@@ -6,6 +6,8 @@ CoordMode "Mouse", "Screen"
 
 global CONFIG := {
     Hotkey: "^F1",
+    RunAsAdmin: false,
+    ShowResultAtMouse: true,
     RequestTimeoutMs: 3000,
     RequestPollIntervalMs: 50,
     SelectionTimeoutSeconds: 0.5,
@@ -15,6 +17,9 @@ global CONFIG := {
         . "AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 "
         . "MicroMessenger/8.0.32(0x18002035) NetType/WIFI Language/zh_TW"
 }
+
+global CONFIG_PATH := A_WorkingDir . "\translate_v2.ini"
+global AUTOSTART_SHORTCUT := A_Startup . "\WeChatTranslateV2.lnk"
 
 global TranslationBusy := false
 global ResultGui := 0
@@ -28,7 +33,9 @@ global ResultManualPosition := 0
 global ActiveInputDialog := 0
 global ActiveTranslationRequest := 0
 
-Hotkey CONFIG.Hotkey, TranslateFromHotkey
+LoadConfig()
+EnsureConfiguredElevation()
+RegisterTranslationHotkey()
 OnMessage(0x0100, HandleInputKeyDown)
 OnMessage(0x0201, HandleWindowBackgroundDrag)
 OnMessage(0x0006, HandleWindowActivation)
@@ -36,41 +43,278 @@ SetupTrayMenu()
 ShowStartupNotification()
 
 
+LoadConfig()
+{
+    global CONFIG, CONFIG_PATH, ShowResultAtMouse
+
+    if !FileExist(CONFIG_PATH)
+        CreateDefaultConfig()
+
+    CONFIG.Hotkey := Trim(IniRead(CONFIG_PATH, "Settings", "Hotkey", CONFIG.Hotkey))
+    CONFIG.RunAsAdmin := ReadBooleanSetting("RunAsAdmin", CONFIG.RunAsAdmin)
+    CONFIG.ShowResultAtMouse := ReadBooleanSetting(
+        "ShowResultAtMouse",
+        CONFIG.ShowResultAtMouse
+    )
+    ShowResultAtMouse := CONFIG.ShowResultAtMouse
+}
+
+
+CreateDefaultConfig()
+{
+    global CONFIG, CONFIG_PATH
+
+    IniWrite(CONFIG.Hotkey, CONFIG_PATH, "Settings", "Hotkey")
+    IniWrite(CONFIG.RunAsAdmin ? 1 : 0, CONFIG_PATH, "Settings", "RunAsAdmin")
+    IniWrite(
+        CONFIG.ShowResultAtMouse ? 1 : 0,
+        CONFIG_PATH,
+        "Settings",
+        "ShowResultAtMouse"
+    )
+}
+
+
+ReadBooleanSetting(name, defaultValue)
+{
+    global CONFIG_PATH
+
+    value := Trim(IniRead(
+        CONFIG_PATH,
+        "Settings",
+        name,
+        defaultValue ? "1" : "0"
+    ))
+
+    return value = "1"
+        || StrLower(value) = "true"
+        || StrLower(value) = "yes"
+        || StrLower(value) = "on"
+}
+
+
+WriteConfigSetting(name, value)
+{
+    global CONFIG_PATH
+    IniWrite(value, CONFIG_PATH, "Settings", name)
+}
+
+
+EnsureConfiguredElevation()
+{
+    global CONFIG
+
+    if !CONFIG.RunAsAdmin || A_IsAdmin
+        return
+
+    try
+    {
+        Run(GetLaunchCommand(true), A_WorkingDir)
+        ExitApp()
+    }
+    catch Error as err
+    {
+        MsgBox(
+            "无法以管理员身份启动：`n" . err.Message,
+            "微信翻译",
+            "Icon!"
+        )
+        ExitApp()
+    }
+}
+
+
+RegisterTranslationHotkey()
+{
+    global CONFIG
+
+    try Hotkey(CONFIG.Hotkey, TranslateFromHotkey)
+    catch Error
+    {
+        invalidHotkey := CONFIG.Hotkey
+        CONFIG.Hotkey := "^F1"
+        WriteConfigSetting("Hotkey", CONFIG.Hotkey)
+        Hotkey(CONFIG.Hotkey, TranslateFromHotkey)
+        MsgBox(
+            "配置文件中的翻译快捷键无效：" . invalidHotkey
+                . "`n已恢复为 ^F1。",
+            "微信翻译",
+            "Icon!"
+        )
+    }
+}
+
+
 SetupTrayMenu()
 {
-    global ShowResultAtMouse
+    global CONFIG, ShowResultAtMouse
 
     A_TrayMenu.Delete()
-    A_TrayMenu.Add("翻译`tCtrl+F1", TranslateFromHotkey)
+    translateMenuText := "翻译`t" . CONFIG.Hotkey
+    A_TrayMenu.Add(translateMenuText, TranslateFromHotkey)
     A_TrayMenu.Add("在鼠标指针处显示结果", ToggleResultAtMouse)
 
     if ShowResultAtMouse
         A_TrayMenu.Check("在鼠标指针处显示结果")
 
     A_TrayMenu.Add()
+    A_TrayMenu.Add("开机自启", ToggleAutostart)
+    A_TrayMenu.Add("以管理员身份启动", ToggleRunAsAdmin)
+
+    if IsAutostartEnabled()
+        A_TrayMenu.Check("开机自启")
+
+    if CONFIG.RunAsAdmin
+        A_TrayMenu.Check("以管理员身份启动")
+
+    A_TrayMenu.Add()
     A_TrayMenu.Add("退出", (*) => ExitApp())
-    A_TrayMenu.Default := "翻译`tCtrl+F1"
+    A_TrayMenu.Default := translateMenuText
     A_TrayMenu.ClickCount := 1
-    A_IconTip := "微信翻译 (Ctrl+F1)"
+    A_IconTip := "微信翻译 (" . CONFIG.Hotkey . ")"
 }
 
 
 ShowStartupNotification()
 {
+    global CONFIG
+
     TrayTip(
-        "已启动，选中文本后按 Ctrl+F1 翻译。",
+        "已启动，选中文本后按 " . CONFIG.Hotkey . " 翻译。",
         "微信翻译",
         1
     )
 }
 
 
+ToggleAutostart(*)
+{
+    global AUTOSTART_SHORTCUT
+
+    try
+    {
+        if IsAutostartEnabled()
+        {
+            FileDelete(AUTOSTART_SHORTCUT)
+            A_TrayMenu.Uncheck("开机自启")
+        }
+        else
+        {
+            CreateAutostartShortcut()
+            A_TrayMenu.Check("开机自启")
+        }
+    }
+    catch Error as err
+    {
+        MsgBox("修改开机自启失败：`n" . err.Message, "微信翻译", "Icon!")
+    }
+}
+
+
+IsAutostartEnabled()
+{
+    global AUTOSTART_SHORTCUT
+    return FileExist(AUTOSTART_SHORTCUT) != ""
+}
+
+
+CreateAutostartShortcut()
+{
+    global AUTOSTART_SHORTCUT
+
+    shortcut := ComObject("WScript.Shell").CreateShortcut(AUTOSTART_SHORTCUT)
+
+    if A_IsCompiled
+    {
+        shortcut.TargetPath := A_ScriptFullPath
+        shortcut.Arguments := ""
+    }
+    else
+    {
+        shortcut.TargetPath := A_AhkPath
+        shortcut.Arguments := QuoteCommandArgument(A_ScriptFullPath)
+    }
+
+    shortcut.WorkingDirectory := A_WorkingDir
+    shortcut.Description := "微信翻译"
+    shortcut.IconLocation := A_IsCompiled ? A_ScriptFullPath : A_AhkPath
+    shortcut.Save()
+}
+
+
+ToggleRunAsAdmin(*)
+{
+    global CONFIG
+
+    newValue := !CONFIG.RunAsAdmin
+
+    try WriteConfigSetting("RunAsAdmin", newValue ? 1 : 0)
+    catch Error as err
+    {
+        MsgBox("保存管理员启动设置失败：`n" . err.Message, "微信翻译", "Icon!")
+        return
+    }
+
+    CONFIG.RunAsAdmin := newValue
+
+    if !CONFIG.RunAsAdmin
+    {
+        A_TrayMenu.Uncheck("以管理员身份启动")
+        return
+    }
+
+    A_TrayMenu.Check("以管理员身份启动")
+
+    if A_IsAdmin
+        return
+
+    try
+    {
+        Run(GetLaunchCommand(true), A_WorkingDir)
+        ExitApp()
+    }
+    catch Error as err
+    {
+        CONFIG.RunAsAdmin := false
+        try WriteConfigSetting("RunAsAdmin", 0)
+        A_TrayMenu.Uncheck("以管理员身份启动")
+        MsgBox(
+            "未能以管理员身份重新启动，已撤销该设置：`n" . err.Message,
+            "微信翻译",
+            "Icon!"
+        )
+    }
+}
+
+
+GetLaunchCommand(runAsAdmin := false)
+{
+    prefix := runAsAdmin ? "*RunAs " : ""
+
+    if A_IsCompiled
+        return prefix . QuoteCommandArgument(A_ScriptFullPath)
+            . (runAsAdmin ? " /restart" : "")
+
+    return prefix . QuoteCommandArgument(A_AhkPath)
+        . (runAsAdmin ? " /restart " : " ")
+        . QuoteCommandArgument(A_ScriptFullPath)
+}
+
+
+QuoteCommandArgument(value)
+{
+    return Chr(34) . StrReplace(value, Chr(34), Chr(92) . Chr(34)) . Chr(34)
+}
+
+
 ToggleResultAtMouse(*)
 {
-    global ResultGui, ShowResultAtMouse, ResultManualPosition
+    global CONFIG, ResultGui, ShowResultAtMouse, ResultManualPosition
 
     menuText := "在鼠标指针处显示结果"
     ShowResultAtMouse := !ShowResultAtMouse
+    CONFIG.ShowResultAtMouse := ShowResultAtMouse
+    WriteConfigSetting("ShowResultAtMouse", ShowResultAtMouse ? 1 : 0)
 
     if ShowResultAtMouse
     {
