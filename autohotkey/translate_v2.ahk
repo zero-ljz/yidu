@@ -755,7 +755,7 @@ CreateResultWindow()
 {
     global ResultGui, ResultEdit, ResultPinButton, ResultCopyButton, ResultCloseButton
 
-    ResultGui := Gui("+Resize +MinSize360x200", "翻译结果")
+    ResultGui := Gui("+Resize +MinSize240x128", "翻译结果")
     ResultGui.MarginX := 10
     ResultGui.MarginY := 10
     ResultGui.BackColor := "171A1F"
@@ -764,9 +764,9 @@ CreateResultWindow()
     ResultEdit := ResultGui.AddEdit(
         "xm ym w360 h144 +Multi +WantReturn Background20242B cF1F3F5"
     )
-    ResultPinButton := ResultGui.AddButton("xm y+10 w80 h26", "钉住")
-    ResultCopyButton := ResultGui.AddButton("x184 yp w96 h26 Default", "复制结果")
-    ResultCloseButton := ResultGui.AddButton("x+10 yp w80 h26", "关闭")
+    ResultPinButton := ResultGui.AddButton("xm y+10 w72 h26", "钉住")
+    ResultCopyButton := ResultGui.AddButton("x238 yp w72 h26 Default", "复制结果")
+    ResultCloseButton := ResultGui.AddButton("x+8 yp w52 h26", "关闭")
 
     ResultPinButton.OnEvent("Click", ToggleResultPinned)
     ResultCopyButton.OnEvent("Click", CopyCurrentTranslation)
@@ -871,10 +871,10 @@ ResizeResultWindow(
     if minMax = -1
         return
 
-    resultEdit.Move(10, 10, Max(200, width - 20), Max(100, height - 56))
+    resultEdit.Move(10, 10, Max(120, width - 20), Max(72, height - 56))
     pinButton.Move(10, height - 36)
-    copyButton.Move(width - 196, height - 36)
-    closeButton.Move(width - 90, height - 36)
+    copyButton.Move(width - 142, height - 36)
+    closeButton.Move(width - 62, height - 36)
 }
 
 
