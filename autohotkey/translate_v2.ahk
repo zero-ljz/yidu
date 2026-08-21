@@ -217,10 +217,11 @@ PromptForTranslationText()
         ResizeInputWindow.Bind(inputEdit, pinButton, translateButton, cancelButton)
     )
 
-    inputGui.Show("w460 h260")
     ApplyDarkTheme(inputGui, inputEdit, pinButton, translateButton, cancelButton)
+    inputGui.Show("w460 h260")
     WinSetTransparent(238, "ahk_id " . inputGui.Hwnd)
     inputEdit.Focus()
+    RedrawGuiWindow(inputGui)
 
     WinWaitClose("ahk_id " . inputGui.Hwnd)
     ActiveInputDialog := 0
@@ -376,6 +377,7 @@ ResizeInputWindow(
     pinButton.Move(10, height - 36)
     translateButton.Move(width - 142, height - 36)
     cancelButton.Move(width - 62, height - 36)
+    RedrawGuiWindow(guiObject)
 }
 
 
@@ -581,7 +583,6 @@ ShowTranslationResult(translatedText, pending := false)
 
     if isNewWindow
     {
-        ResultGui.Show("w360 h200")
         ApplyDarkTheme(
             ResultGui,
             ResultEdit,
@@ -589,6 +590,7 @@ ShowTranslationResult(translatedText, pending := false)
             ResultCopyButton,
             ResultCloseButton
         )
+        ResultGui.Show("w360 h200")
         WinSetTransparent(225, "ahk_id " . ResultGui.Hwnd)
     }
     else
@@ -606,6 +608,7 @@ ShowTranslationResult(translatedText, pending := false)
         PositionResultWindowAtMouse()
 
     WinActivate("ahk_id " . ResultGui.Hwnd)
+    RedrawGuiWindow(ResultGui)
 }
 
 
@@ -796,10 +799,29 @@ HideResultWindow(*)
 
 CopyCurrentTranslation(*)
 {
-    global ResultEdit
+    global ResultGui, ResultEdit, ResultCopyButton
 
     if IsObject(ResultEdit)
-        CopyTranslation(ResultEdit.Value)
+    {
+        A_Clipboard := ResultEdit.Value
+        ResultCopyButton.Text := "已复制"
+        SetTimer(RestoreCopyButtonFeedback, -900)
+        RedrawGuiWindow(ResultGui)
+    }
+}
+
+
+RestoreCopyButtonFeedback()
+{
+    global ResultGui, ResultCopyButton
+
+    if !IsObject(ResultCopyButton)
+        return
+
+    ResultCopyButton.Text := "复制结果"
+
+    if IsObject(ResultGui)
+        RedrawGuiWindow(ResultGui)
 }
 
 
@@ -857,6 +879,28 @@ ApplyDarkTheme(guiObject, controls*)
 }
 
 
+RedrawGuiWindow(guiObject)
+{
+    static RDW_INVALIDATE := 0x0001
+    static RDW_ERASE := 0x0004
+    static RDW_ALLCHILDREN := 0x0080
+    static RDW_UPDATENOW := 0x0100
+    static RDW_FRAME := 0x0400
+
+    try DllCall(
+        "RedrawWindow",
+        "Ptr", guiObject.Hwnd,
+        "Ptr", 0,
+        "Ptr", 0,
+        "UInt", RDW_INVALIDATE
+            | RDW_ERASE
+            | RDW_ALLCHILDREN
+            | RDW_UPDATENOW
+            | RDW_FRAME
+    )
+}
+
+
 ResizeResultWindow(
     resultEdit,
     pinButton,
@@ -875,13 +919,7 @@ ResizeResultWindow(
     pinButton.Move(10, height - 36)
     copyButton.Move(width - 142, height - 36)
     closeButton.Move(width - 62, height - 36)
-}
-
-
-CopyTranslation(text)
-{
-    A_Clipboard := text
-    TrayTip("译文已复制到剪贴板。", "微信翻译", 1)
+    RedrawGuiWindow(guiObject)
 }
 
 
