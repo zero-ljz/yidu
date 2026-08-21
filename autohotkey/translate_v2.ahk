@@ -188,9 +188,9 @@ PromptForTranslationText()
     inputEdit := inputGui.AddEdit(
         "xm ym w440 h204 +Multi +WantReturn Background20242B cF1F3F5"
     )
-    pinButton := inputGui.AddButton("xm y+10 w80 h26", "钉住")
-    translateButton := inputGui.AddButton("x264 yp w96 h26 Default", "翻译")
-    cancelButton := inputGui.AddButton("x+10 yp w80 h26", "取消")
+    pinButton := inputGui.AddButton("xm y+10 w72 h26", "钉住")
+    translateButton := inputGui.AddButton("x318 yp w72 h26 Default", "翻译")
+    cancelButton := inputGui.AddButton("x+8 yp w52 h26", "取消")
 
     ActiveInputDialog := {
         Gui: inputGui,
@@ -374,8 +374,8 @@ ResizeInputWindow(
 
     inputEdit.Move(10, 10, Max(200, width - 20), Max(100, height - 56))
     pinButton.Move(10, height - 36)
-    translateButton.Move(width - 196, height - 36)
-    cancelButton.Move(width - 90, height - 36)
+    translateButton.Move(width - 142, height - 36)
+    cancelButton.Move(width - 62, height - 36)
 }
 
 
