@@ -28,6 +28,7 @@ global ActiveTranslationRequest := 0
 Hotkey CONFIG.Hotkey, TranslateFromHotkey
 OnMessage(0x0100, HandleInputKeyDown)
 OnMessage(0x0201, HandleWindowBackgroundDrag)
+OnMessage(0x0006, HandleWindowActivation)
 SetupTrayMenu()
 
 
@@ -108,10 +109,14 @@ PromptForTranslationText()
 
     state := {
         Confirmed: false,
-        Text: ""
+        Text: "",
+        Pinned: false
     }
 
-    inputGui := Gui("+Resize +MinSize360x200", "输入翻译内容")
+    inputGui := Gui(
+        "+Resize -MinimizeBox -MaximizeBox +MinSize360x200",
+        "输入翻译内容"
+    )
     inputGui.MarginX := 16
     inputGui.MarginY := 14
     inputGui.BackColor := "171A1F"
@@ -120,7 +125,8 @@ PromptForTranslationText()
     inputEdit := inputGui.AddEdit(
         "xm ym w428 h188 +Multi +WantReturn Background20242B cF1F3F5"
     )
-    translateButton := inputGui.AddButton("x258 y+14 w96 h30 Default", "翻译")
+    pinButton := inputGui.AddButton("xm y+14 w96 h30", "钉住")
+    translateButton := inputGui.AddButton("x258 yp w96 h30 Default", "翻译")
     cancelButton := inputGui.AddButton("x+10 yp w80 h30", "取消")
 
     ActiveInputDialog := {
@@ -129,6 +135,10 @@ PromptForTranslationText()
         State: state
     }
 
+    pinButton.OnEvent(
+        "Click",
+        ToggleInputPinned.Bind(state, inputGui, pinButton)
+    )
     translateButton.OnEvent(
         "Click",
         SubmitTranslationInput.Bind(state, inputEdit, inputGui)
@@ -138,17 +148,25 @@ PromptForTranslationText()
     inputGui.OnEvent("Escape", CancelTranslationInput.Bind(inputGui))
     inputGui.OnEvent(
         "Size",
-        ResizeInputWindow.Bind(inputEdit, translateButton, cancelButton)
+        ResizeInputWindow.Bind(inputEdit, pinButton, translateButton, cancelButton)
     )
 
     inputGui.Show("w460 h260")
-    ApplyDarkTheme(inputGui, inputEdit, translateButton, cancelButton)
+    ApplyDarkTheme(inputGui, inputEdit, pinButton, translateButton, cancelButton)
     WinSetTransparent(245, "ahk_id " . inputGui.Hwnd)
     inputEdit.Focus()
 
     WinWaitClose("ahk_id " . inputGui.Hwnd)
     ActiveInputDialog := 0
     return state.Confirmed ? state.Text : ""
+}
+
+
+ToggleInputPinned(state, inputGui, pinButton, *)
+{
+    state.Pinned := !state.Pinned
+    WinSetAlwaysOnTop(state.Pinned, "ahk_id " . inputGui.Hwnd)
+    pinButton.Text := state.Pinned ? "取消钉住" : "钉住"
 }
 
 
@@ -239,12 +257,57 @@ HandleWindowBackgroundDrag(wParam, lParam, message, hwnd)
 }
 
 
-ResizeInputWindow(inputEdit, translateButton, cancelButton, guiObject, minMax, width, height)
+HandleWindowActivation(wParam, lParam, message, hwnd)
+{
+    global ActiveInputDialog
+
+    if !IsObject(ActiveInputDialog)
+        return
+
+    if hwnd != ActiveInputDialog.Gui.Hwnd
+        return
+
+    if (wParam & 0xFFFF) != 0 || ActiveInputDialog.State.Pinned
+        return
+
+    SetTimer(CloseInactiveInputWindow.Bind(hwnd), -1)
+}
+
+
+CloseInactiveInputWindow(hwnd)
+{
+    global ActiveInputDialog
+
+    if !IsObject(ActiveInputDialog)
+        return
+
+    if ActiveInputDialog.Gui.Hwnd != hwnd
+        return
+
+    if ActiveInputDialog.State.Pinned
+        return
+
+    if !WinActive("ahk_id " . hwnd)
+        CancelTranslationInput(ActiveInputDialog.Gui)
+}
+
+
+ResizeInputWindow(
+    inputEdit,
+    pinButton,
+    translateButton,
+    cancelButton,
+    guiObject,
+    minMax,
+    width,
+    height
+)
 {
     if minMax = -1
         return
 
     inputEdit.Move(16, 14, Max(200, width - 32), Max(100, height - 72))
+    pinButton.Move(16, height - 44)
     translateButton.Move(width - 202, height - 44)
     cancelButton.Move(width - 96, height - 44)
 }
