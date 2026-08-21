@@ -2,6 +2,7 @@
 #SingleInstance Force
 
 SendMode "Input"
+CoordMode "Mouse", "Screen"
 
 global CONFIG := {
     Hotkey: "^F1",
@@ -22,6 +23,8 @@ global ResultPinButton := 0
 global ResultCopyButton := 0
 global ResultCloseButton := 0
 global ResultPinned := false
+global ShowResultAtMouse := true
+global ResultManualPosition := 0
 global ActiveInputDialog := 0
 global ActiveTranslationRequest := 0
 
@@ -30,17 +33,77 @@ OnMessage(0x0100, HandleInputKeyDown)
 OnMessage(0x0201, HandleWindowBackgroundDrag)
 OnMessage(0x0006, HandleWindowActivation)
 SetupTrayMenu()
+ShowStartupNotification()
 
 
 SetupTrayMenu()
 {
+    global ShowResultAtMouse
+
     A_TrayMenu.Delete()
     A_TrayMenu.Add("翻译`tCtrl+F1", TranslateFromHotkey)
+    A_TrayMenu.Add("在鼠标指针处显示结果", ToggleResultAtMouse)
+
+    if ShowResultAtMouse
+        A_TrayMenu.Check("在鼠标指针处显示结果")
+
     A_TrayMenu.Add()
     A_TrayMenu.Add("退出", (*) => ExitApp())
     A_TrayMenu.Default := "翻译`tCtrl+F1"
     A_TrayMenu.ClickCount := 1
     A_IconTip := "微信翻译 (Ctrl+F1)"
+}
+
+
+ShowStartupNotification()
+{
+    TrayTip(
+        "已启动，选中文本后按 Ctrl+F1 翻译。",
+        "微信翻译",
+        1
+    )
+}
+
+
+ToggleResultAtMouse(*)
+{
+    global ResultGui, ShowResultAtMouse, ResultManualPosition
+
+    menuText := "在鼠标指针处显示结果"
+    ShowResultAtMouse := !ShowResultAtMouse
+
+    if ShowResultAtMouse
+    {
+        A_TrayMenu.Check(menuText)
+
+        if IsObject(ResultGui)
+        {
+            try
+            {
+                GetPhysicalWindowRect(ResultGui.Hwnd, &windowX, &windowY)
+                ResultManualPosition := {
+                    X: windowX,
+                    Y: windowY
+                }
+
+                if DllCall("IsWindowVisible", "Ptr", ResultGui.Hwnd)
+                    PositionResultWindowAtMouse()
+            }
+        }
+    }
+    else
+    {
+        A_TrayMenu.Uncheck(menuText)
+
+        if IsObject(ResultGui) && IsObject(ResultManualPosition)
+        {
+            try MoveWindowPhysical(
+                ResultGui.Hwnd,
+                ResultManualPosition.X,
+                ResultManualPosition.Y
+            )
+        }
+    }
 }
 
 
@@ -125,7 +188,7 @@ PromptForTranslationText()
     inputEdit := inputGui.AddEdit(
         "xm ym w440 h204 +Multi +WantReturn Background20242B cF1F3F5"
     )
-    pinButton := inputGui.AddButton("xm y+10 w96 h26", "钉住")
+    pinButton := inputGui.AddButton("xm y+10 w80 h26", "钉住")
     translateButton := inputGui.AddButton("x264 yp w96 h26 Default", "翻译")
     cancelButton := inputGui.AddButton("x+10 yp w80 h26", "取消")
 
@@ -503,8 +566,11 @@ UrlEncode(text)
 ShowTranslationResult(translatedText, pending := false)
 {
     global ResultGui, ResultEdit, ResultPinButton, ResultCopyButton, ResultCloseButton
+    global ShowResultAtMouse
 
     isNewWindow := !IsObject(ResultGui)
+    wasVisible := !isNewWindow
+        && DllCall("IsWindowVisible", "Ptr", ResultGui.Hwnd)
 
     if isNewWindow
         CreateResultWindow()
@@ -515,7 +581,7 @@ ShowTranslationResult(translatedText, pending := false)
 
     if isNewWindow
     {
-        ResultGui.Show("w460 h250")
+        ResultGui.Show("w360 h200")
         ApplyDarkTheme(
             ResultGui,
             ResultEdit,
@@ -536,7 +602,146 @@ ShowTranslationResult(translatedText, pending := false)
         ResultGui.Show()
     }
 
+    if ShowResultAtMouse && (pending || isNewWindow || !wasVisible)
+        PositionResultWindowAtMouse()
+
     WinActivate("ahk_id " . ResultGui.Hwnd)
+}
+
+
+PositionResultWindowAtMouse()
+{
+    global ResultGui, ResultPinned
+
+    if !IsObject(ResultGui) || ResultPinned
+        return
+
+    try
+    {
+        if WinGetMinMax("ahk_id " . ResultGui.Hwnd) != 0
+            WinRestore("ahk_id " . ResultGui.Hwnd)
+
+        cursorPoint := Buffer(8, 0)
+
+        if !DllCall("GetCursorPos", "Ptr", cursorPoint.Ptr)
+            return
+
+        mouseX := NumGet(cursorPoint, 0, "Int")
+        mouseY := NumGet(cursorPoint, 4, "Int")
+        GetPhysicalWindowRect(
+            ResultGui.Hwnd,
+            ,
+            ,
+            &windowWidth,
+            &windowHeight
+        )
+
+        monitor := GetMonitorAtPoint(mouseX, mouseY)
+        MonitorGetWorkArea(
+            monitor,
+            &workLeft,
+            &workTop,
+            &workRight,
+            &workBottom
+        )
+
+        gap := 12
+        targetX := mouseX + gap
+        targetY := mouseY + gap
+
+        if targetX + windowWidth > workRight
+            targetX := mouseX - windowWidth - gap
+
+        if targetY + windowHeight > workBottom
+            targetY := mouseY - windowHeight - gap
+
+        maxX := workRight - windowWidth
+        maxY := workBottom - windowHeight
+        targetX := maxX < workLeft
+            ? workLeft
+            : Min(Max(targetX, workLeft), maxX)
+        targetY := maxY < workTop
+            ? workTop
+            : Min(Max(targetY, workTop), maxY)
+
+        MoveWindowPhysical(
+            ResultGui.Hwnd,
+            targetX,
+            targetY
+        )
+    }
+}
+
+
+GetPhysicalWindowRect(
+    hwnd,
+    &x := 0,
+    &y := 0,
+    &width := 0,
+    &height := 0
+)
+{
+    rect := Buffer(16, 0)
+
+    if !DllCall("GetWindowRect", "Ptr", hwnd, "Ptr", rect.Ptr)
+        throw OSError()
+
+    left := NumGet(rect, 0, "Int")
+    top := NumGet(rect, 4, "Int")
+    right := NumGet(rect, 8, "Int")
+    bottom := NumGet(rect, 12, "Int")
+
+    x := left
+    y := top
+    width := right - left
+    height := bottom - top
+}
+
+
+MoveWindowPhysical(hwnd, x, y)
+{
+    static SWP_NOSIZE_NOZORDER_NOACTIVATE := 0x0015
+
+    if !DllCall(
+        "SetWindowPos",
+        "Ptr", hwnd,
+        "Ptr", 0,
+        "Int", Round(x),
+        "Int", Round(y),
+        "Int", 0,
+        "Int", 0,
+        "UInt", SWP_NOSIZE_NOZORDER_NOACTIVATE
+    )
+    {
+        throw OSError()
+    }
+}
+
+
+GetMonitorAtPoint(x, y)
+{
+    monitorCount := MonitorGetCount()
+
+    Loop monitorCount
+    {
+        MonitorGet(
+            A_Index,
+            &monitorLeft,
+            &monitorTop,
+            &monitorRight,
+            &monitorBottom
+        )
+
+        if x >= monitorLeft
+            && x < monitorRight
+            && y >= monitorTop
+            && y < monitorBottom
+        {
+            return A_Index
+        }
+    }
+
+    return MonitorGetPrimary()
 }
 
 
@@ -557,10 +762,10 @@ CreateResultWindow()
     ResultGui.SetFont("s10 cF1F3F5", "Microsoft YaHei UI")
 
     ResultEdit := ResultGui.AddEdit(
-        "xm ym w440 h194 +Multi +WantReturn Background20242B cF1F3F5"
+        "xm ym w360 h144 +Multi +WantReturn Background20242B cF1F3F5"
     )
-    ResultPinButton := ResultGui.AddButton("xm y+10 w96 h26", "钉住")
-    ResultCopyButton := ResultGui.AddButton("x264 yp w96 h26 Default", "复制结果")
+    ResultPinButton := ResultGui.AddButton("xm y+10 w80 h26", "钉住")
+    ResultCopyButton := ResultGui.AddButton("x184 yp w96 h26 Default", "复制结果")
     ResultCloseButton := ResultGui.AddButton("x+10 yp w80 h26", "关闭")
 
     ResultPinButton.OnEvent("Click", ToggleResultPinned)
