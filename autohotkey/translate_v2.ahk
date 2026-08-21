@@ -117,21 +117,24 @@ PromptForTranslationText()
         "+Resize -MinimizeBox -MaximizeBox +MinSize360x200",
         "输入翻译内容"
     )
-    inputGui.MarginX := 16
-    inputGui.MarginY := 14
+    inputGui.MarginX := 10
+    inputGui.MarginY := 10
     inputGui.BackColor := "171A1F"
     inputGui.SetFont("s10 cF1F3F5", "Microsoft YaHei UI")
 
     inputEdit := inputGui.AddEdit(
-        "xm ym w428 h188 +Multi +WantReturn Background20242B cF1F3F5"
+        "xm ym w440 h204 +Multi +WantReturn Background20242B cF1F3F5"
     )
-    pinButton := inputGui.AddButton("xm y+14 w96 h30", "钉住")
-    translateButton := inputGui.AddButton("x258 yp w96 h30 Default", "翻译")
-    cancelButton := inputGui.AddButton("x+10 yp w80 h30", "取消")
+    pinButton := inputGui.AddButton("xm y+10 w96 h26", "钉住")
+    translateButton := inputGui.AddButton("x264 yp w96 h26 Default", "翻译")
+    cancelButton := inputGui.AddButton("x+10 yp w80 h26", "取消")
 
     ActiveInputDialog := {
         Gui: inputGui,
         Edit: inputEdit,
+        PinButton: pinButton,
+        TranslateButton: translateButton,
+        CancelButton: cancelButton,
         State: state
     }
 
@@ -153,7 +156,7 @@ PromptForTranslationText()
 
     inputGui.Show("w460 h260")
     ApplyDarkTheme(inputGui, inputEdit, pinButton, translateButton, cancelButton)
-    WinSetTransparent(245, "ahk_id " . inputGui.Hwnd)
+    WinSetTransparent(238, "ahk_id " . inputGui.Hwnd)
     inputEdit.Focus()
 
     WinWaitClose("ahk_id " . inputGui.Hwnd)
@@ -306,10 +309,10 @@ ResizeInputWindow(
     if minMax = -1
         return
 
-    inputEdit.Move(16, 14, Max(200, width - 32), Max(100, height - 72))
-    pinButton.Move(16, height - 44)
-    translateButton.Move(width - 202, height - 44)
-    cancelButton.Move(width - 96, height - 44)
+    inputEdit.Move(10, 10, Max(200, width - 20), Max(100, height - 56))
+    pinButton.Move(10, height - 36)
+    translateButton.Move(width - 196, height - 36)
+    cancelButton.Move(width - 90, height - 36)
 }
 
 
@@ -520,7 +523,7 @@ ShowTranslationResult(translatedText, pending := false)
             ResultCopyButton,
             ResultCloseButton
         )
-        WinSetTransparent(235, "ahk_id " . ResultGui.Hwnd)
+        WinSetTransparent(225, "ahk_id " . ResultGui.Hwnd)
     }
     else
     {
@@ -548,17 +551,17 @@ CreateResultWindow()
     global ResultGui, ResultEdit, ResultPinButton, ResultCopyButton, ResultCloseButton
 
     ResultGui := Gui("+Resize +MinSize360x200", "翻译结果")
-    ResultGui.MarginX := 16
-    ResultGui.MarginY := 14
+    ResultGui.MarginX := 10
+    ResultGui.MarginY := 10
     ResultGui.BackColor := "171A1F"
     ResultGui.SetFont("s10 cF1F3F5", "Microsoft YaHei UI")
 
     ResultEdit := ResultGui.AddEdit(
-        "xm ym w428 h178 +Multi +WantReturn Background20242B cF1F3F5"
+        "xm ym w440 h194 +Multi +WantReturn Background20242B cF1F3F5"
     )
-    ResultPinButton := ResultGui.AddButton("xm y+14 w96 h30", "钉住")
-    ResultCopyButton := ResultGui.AddButton("x258 yp w96 h30 Default", "复制结果")
-    ResultCloseButton := ResultGui.AddButton("x+10 yp w80 h30", "关闭")
+    ResultPinButton := ResultGui.AddButton("xm y+10 w96 h26", "钉住")
+    ResultCopyButton := ResultGui.AddButton("x264 yp w96 h26 Default", "复制结果")
+    ResultCloseButton := ResultGui.AddButton("x+10 yp w80 h26", "关闭")
 
     ResultPinButton.OnEvent("Click", ToggleResultPinned)
     ResultCopyButton.OnEvent("Click", CopyCurrentTranslation)
@@ -663,10 +666,10 @@ ResizeResultWindow(
     if minMax = -1
         return
 
-    resultEdit.Move(16, 14, Max(200, width - 32), Max(100, height - 72))
-    pinButton.Move(16, height - 44)
-    copyButton.Move(width - 202, height - 44)
-    closeButton.Move(width - 96, height - 44)
+    resultEdit.Move(10, 10, Max(200, width - 20), Max(100, height - 56))
+    pinButton.Move(10, height - 36)
+    copyButton.Move(width - 196, height - 36)
+    closeButton.Move(width - 90, height - 36)
 }
 
 
