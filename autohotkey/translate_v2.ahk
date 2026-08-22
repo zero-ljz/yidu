@@ -6,6 +6,7 @@ CoordMode "Mouse", "Screen"
 
 global CONFIG := {
     Hotkey: "^F1",
+    SpeakHotkey: "^F2",
     RunAsAdmin: false,
     ShowResultAtMouse: true,
     RequestTimeoutMs: 10000,
@@ -49,6 +50,7 @@ global SpeechWorkerReadyPath := ""
 LoadConfig()
 EnsureConfiguredElevation()
 RegisterTranslationHotkey()
+RegisterSpeakHotkey()
 OnMessage(0x0100, HandleInputKeyDown)
 OnMessage(0x0201, HandleWindowBackgroundDrag)
 OnMessage(0x0006, HandleWindowActivation)
@@ -66,6 +68,12 @@ LoadConfig()
         CreateDefaultConfig()
 
     CONFIG.Hotkey := Trim(IniRead(CONFIG_PATH, "Settings", "Hotkey", CONFIG.Hotkey))
+    CONFIG.SpeakHotkey := Trim(IniRead(
+        CONFIG_PATH,
+        "Settings",
+        "SpeakHotkey",
+        CONFIG.SpeakHotkey
+    ))
     CONFIG.RunAsAdmin := ReadBooleanSetting("RunAsAdmin", CONFIG.RunAsAdmin)
     CONFIG.ShowResultAtMouse := ReadBooleanSetting(
         "ShowResultAtMouse",
@@ -80,6 +88,7 @@ CreateDefaultConfig()
     global CONFIG, CONFIG_PATH
 
     IniWrite(CONFIG.Hotkey, CONFIG_PATH, "Settings", "Hotkey")
+    IniWrite(CONFIG.SpeakHotkey, CONFIG_PATH, "Settings", "SpeakHotkey")
     IniWrite(CONFIG.RunAsAdmin ? 1 : 0, CONFIG_PATH, "Settings", "RunAsAdmin")
     IniWrite(
         CONFIG.ShowResultAtMouse ? 1 : 0,
@@ -160,13 +169,44 @@ RegisterTranslationHotkey()
 }
 
 
+RegisterSpeakHotkey()
+{
+    global CONFIG
+
+    try
+    {
+        if StrLower(CONFIG.SpeakHotkey) = StrLower(CONFIG.Hotkey)
+            throw Error("朗读快捷键不能与翻译快捷键相同。")
+
+        Hotkey(CONFIG.SpeakHotkey, SpeakFromHotkey)
+    }
+    catch Error
+    {
+        invalidHotkey := CONFIG.SpeakHotkey
+        CONFIG.SpeakHotkey := StrLower(CONFIG.Hotkey) = "^f2"
+            ? "^+F2"
+            : "^F2"
+        WriteConfigSetting("SpeakHotkey", CONFIG.SpeakHotkey)
+        Hotkey(CONFIG.SpeakHotkey, SpeakFromHotkey)
+        MsgBox(
+            "配置文件中的朗读快捷键无效：" . invalidHotkey
+                . "`n已恢复为 " . CONFIG.SpeakHotkey . "。",
+            "微信翻译",
+            "Icon!"
+        )
+    }
+}
+
+
 SetupTrayMenu()
 {
     global CONFIG, ShowResultAtMouse
 
     A_TrayMenu.Delete()
     translateMenuText := "翻译`t" . CONFIG.Hotkey
+    speakMenuText := "朗读`t" . CONFIG.SpeakHotkey
     A_TrayMenu.Add(translateMenuText, TranslateFromHotkey)
+    A_TrayMenu.Add(speakMenuText, SpeakFromHotkey)
     A_TrayMenu.Add("在鼠标指针处显示结果", ToggleResultAtMouse)
 
     if ShowResultAtMouse
@@ -186,7 +226,8 @@ SetupTrayMenu()
     A_TrayMenu.Add("退出", (*) => ExitApp())
     A_TrayMenu.Default := translateMenuText
     A_TrayMenu.ClickCount := 1
-    A_IconTip := "微信翻译 (" . CONFIG.Hotkey . ")"
+    A_IconTip := "微信翻译 (翻译 " . CONFIG.Hotkey
+        . "，朗读 " . CONFIG.SpeakHotkey . ")"
 }
 
 
@@ -195,7 +236,8 @@ ShowStartupNotification()
     global CONFIG
 
     TrayTip(
-        "已启动，选中文本后按 " . CONFIG.Hotkey . " 翻译。",
+        "已启动：" . CONFIG.Hotkey . " 翻译，"
+            . CONFIG.SpeakHotkey . " 朗读。",
         "微信翻译",
         1
     )
@@ -368,7 +410,13 @@ ToggleResultAtMouse(*)
 
 TranslateFromHotkey(*)
 {
-    global TranslationBusy
+    global ActiveInputDialog, TranslationBusy
+
+    if IsObject(ActiveInputDialog)
+    {
+        try WinActivate("ahk_id " . ActiveInputDialog.Gui.Hwnd)
+        return
+    }
 
     if TranslationBusy
         return
@@ -381,7 +429,7 @@ TranslateFromHotkey(*)
 
         if sourceText = ""
         {
-            sourceText := PromptForTranslationText()
+            sourceText := PromptForText("输入翻译内容", "翻译")
 
             if sourceText = ""
             {
@@ -397,6 +445,33 @@ TranslateFromHotkey(*)
     {
         TranslationBusy := false
         ShowTranslationError(err.Message)
+    }
+}
+
+
+SpeakFromHotkey(*)
+{
+    global ActiveInputDialog
+
+    if IsObject(ActiveInputDialog)
+    {
+        try WinActivate("ahk_id " . ActiveInputDialog.Gui.Hwnd)
+        return
+    }
+
+    try
+    {
+        sourceText := GetSelectedText()
+
+        if sourceText = ""
+            sourceText := PromptForText("输入朗读内容", "朗读")
+
+        if sourceText != ""
+            StartEdgeSpeech(sourceText, "zh-CN-XiaoyiNeural")
+    }
+    catch Error as err
+    {
+        TrayTip("无法朗读：" . err.Message, "微信翻译朗读", 2)
     }
 }
 
@@ -425,7 +500,7 @@ GetSelectedText()
 }
 
 
-PromptForTranslationText()
+PromptForText(windowTitle, submitLabel)
 {
     global ActiveInputDialog
 
@@ -437,7 +512,7 @@ PromptForTranslationText()
 
     inputGui := Gui(
         "+Resize -MinimizeBox -MaximizeBox +MinSize360x200",
-        "输入翻译内容"
+        windowTitle
     )
     inputGui.MarginX := 10
     inputGui.MarginY := 10
@@ -448,14 +523,17 @@ PromptForTranslationText()
         "xm ym w440 h204 +Multi +WantReturn Background20242B cF1F3F5"
     )
     pinButton := inputGui.AddButton("xm y+10 w72 h26", "钉住")
-    translateButton := inputGui.AddButton("x318 yp w72 h26 Default", "翻译")
+    submitButton := inputGui.AddButton(
+        "x318 yp w72 h26 Default",
+        submitLabel
+    )
     cancelButton := inputGui.AddButton("x+8 yp w52 h26", "取消")
 
     ActiveInputDialog := {
         Gui: inputGui,
         Edit: inputEdit,
         PinButton: pinButton,
-        TranslateButton: translateButton,
+        SubmitButton: submitButton,
         CancelButton: cancelButton,
         State: state
     }
@@ -464,19 +542,19 @@ PromptForTranslationText()
         "Click",
         ToggleInputPinned.Bind(state, inputGui, pinButton)
     )
-    translateButton.OnEvent(
+    submitButton.OnEvent(
         "Click",
-        SubmitTranslationInput.Bind(state, inputEdit, inputGui)
+        SubmitTextInput.Bind(state, inputEdit, inputGui)
     )
     cancelButton.OnEvent("Click", CancelTranslationInput.Bind(inputGui))
     inputGui.OnEvent("Close", CancelTranslationInput.Bind(inputGui))
     inputGui.OnEvent("Escape", CancelTranslationInput.Bind(inputGui))
     inputGui.OnEvent(
         "Size",
-        ResizeInputWindow.Bind(inputEdit, pinButton, translateButton, cancelButton)
+        ResizeInputWindow.Bind(inputEdit, pinButton, submitButton, cancelButton)
     )
 
-    ApplyDarkTheme(inputGui, inputEdit, pinButton, translateButton, cancelButton)
+    ApplyDarkTheme(inputGui, inputEdit, pinButton, submitButton, cancelButton)
     inputGui.Show("w460 h260")
     WinSetTransparent(238, "ahk_id " . inputGui.Hwnd)
     inputEdit.Focus()
@@ -496,7 +574,7 @@ ToggleInputPinned(state, inputGui, pinButton, *)
 }
 
 
-SubmitTranslationInput(state, inputEdit, inputGui, *)
+SubmitTextInput(state, inputEdit, inputGui, *)
 {
     global ActiveInputDialog
 
@@ -547,7 +625,7 @@ HandleInputKeyDown(wParam, lParam, message, hwnd)
     }
     else
     {
-        SubmitTranslationInput(
+        SubmitTextInput(
             ActiveInputDialog.State,
             ActiveInputDialog.Edit,
             ActiveInputDialog.Gui
@@ -621,7 +699,7 @@ CloseInactiveInputWindow(hwnd)
 ResizeInputWindow(
     inputEdit,
     pinButton,
-    translateButton,
+    submitButton,
     cancelButton,
     guiObject,
     minMax,
@@ -634,7 +712,7 @@ ResizeInputWindow(
 
     inputEdit.Move(10, 10, Max(200, width - 20), Max(100, height - 56))
     pinButton.Move(10, height - 36)
-    translateButton.Move(width - 142, height - 36)
+    submitButton.Move(width - 142, height - 36)
     cancelButton.Move(width - 62, height - 36)
     RedrawGuiWindow(guiObject)
 }
@@ -1390,7 +1468,8 @@ StartEdgeSpeech(text, voice)
     SpeechSynthesisPending := true
     SpeechStartedAt := A_TickCount
     SpeechTimeoutMs := 60000
-    ResultSpeakButton.Text := "停止"
+    if IsObject(ResultSpeakButton)
+        ResultSpeakButton.Text := "停止"
     SetTimer(CheckSpeechSynthesis, 50)
 }
 
