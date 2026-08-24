@@ -7,6 +7,7 @@ CoordMode "Mouse", "Screen"
 global CONFIG := {
     Hotkey: "^F1",
     SpeakHotkey: "^F2",
+    SpeechVoice: "zh-CN-XiaoyiNeural",
     RunAsAdmin: false,
     ShowResultAtMouse: true,
     RequestTimeoutMs: 10000,
@@ -18,6 +19,24 @@ global CONFIG := {
         . "AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 "
         . "MicroMessenger/8.0.32(0x18002035) NetType/WIFI Language/zh_TW"
 }
+
+global SPEECH_VOICES := [
+    {Label: "云希 Yunxi · 自然男声", Voice: "zh-CN-YunxiNeural"},
+    {Label: "晓晓 Xiaoxiao · 自然女声", Voice: "zh-CN-XiaoxiaoNeural"},
+    {Label: "晓臻 HsiaoChen · 台湾女声", Voice: "zh-TW-HsiaoChenNeural"},
+    {Label: "云哲 YunJhe · 台湾男声", Voice: "zh-TW-YunJheNeural"},
+    {Label: "晓北 Xiaobei · 东北话", Voice: "zh-CN-liaoning-XiaobeiNeural"},
+    {Label: "晓佳 HiuGaai · 粤语", Voice: "zh-HK-HiuGaaiNeural"},
+    {Label: "云健 Yunjian · 新闻播报", Voice: "zh-CN-YunjianNeural"},
+    {Label: "云扬 Yunyang · 短视频旁白", Voice: "zh-CN-YunyangNeural"},
+    {Label: "晓伊 Xiaoyi · 萝莉音", Voice: "zh-CN-XiaoyiNeural"},
+    {Label: "晓妮 Xiaoni · 陕西话（俏皮）", Voice: "zh-CN-shaanxi-XiaoniNeural"},
+    {Label: "晓曼 HiuMaan · 港式女声", Voice: "zh-HK-HiuMaanNeural"},
+    {Label: "万龙 WanLung · 港式男声", Voice: "zh-HK-WanLungNeural"},
+    {Label: "晓雨 HsiaoYu · 台味女声", Voice: "zh-TW-HsiaoYuNeural"},
+    {Label: "Jenny · 英语女声", Voice: "en-US-JennyNeural"},
+    {Label: "Guy · 英语男声", Voice: "en-US-GuyNeural"}
+]
 
 global CONFIG_PATH := A_WorkingDir . "\translate_v2.ini"
 global AUTOSTART_SHORTCUT := A_Startup . "\WeChatTranslateV2.lnk"
@@ -74,6 +93,16 @@ LoadConfig()
         "SpeakHotkey",
         CONFIG.SpeakHotkey
     ))
+    CONFIG.SpeechVoice := Trim(IniRead(
+        CONFIG_PATH,
+        "Settings",
+        "SpeechVoice",
+        CONFIG.SpeechVoice
+    ))
+
+    if GetSpeechVoiceIndex(CONFIG.SpeechVoice) = 0
+        CONFIG.SpeechVoice := "zh-CN-XiaoyiNeural"
+
     CONFIG.RunAsAdmin := ReadBooleanSetting("RunAsAdmin", CONFIG.RunAsAdmin)
     CONFIG.ShowResultAtMouse := ReadBooleanSetting(
         "ShowResultAtMouse",
@@ -89,6 +118,7 @@ CreateDefaultConfig()
 
     IniWrite(CONFIG.Hotkey, CONFIG_PATH, "Settings", "Hotkey")
     IniWrite(CONFIG.SpeakHotkey, CONFIG_PATH, "Settings", "SpeakHotkey")
+    IniWrite(CONFIG.SpeechVoice, CONFIG_PATH, "Settings", "SpeechVoice")
     IniWrite(CONFIG.RunAsAdmin ? 1 : 0, CONFIG_PATH, "Settings", "RunAsAdmin")
     IniWrite(
         CONFIG.ShowResultAtMouse ? 1 : 0,
@@ -96,6 +126,20 @@ CreateDefaultConfig()
         "Settings",
         "ShowResultAtMouse"
     )
+}
+
+
+GetSpeechVoiceIndex(voice)
+{
+    global SPEECH_VOICES
+
+    for index, item in SPEECH_VOICES
+    {
+        if item.Voice = voice
+            return index
+    }
+
+    return 0
 }
 
 
@@ -451,7 +495,7 @@ TranslateFromHotkey(*)
 
 SpeakFromHotkey(*)
 {
-    global ActiveInputDialog
+    global CONFIG, ActiveInputDialog
 
     if IsObject(ActiveInputDialog)
     {
@@ -464,10 +508,10 @@ SpeakFromHotkey(*)
         sourceText := GetSelectedText()
 
         if sourceText = ""
-            sourceText := PromptForText("输入朗读内容", "朗读")
+            sourceText := PromptForText("输入朗读内容", "朗读", true)
 
         if sourceText != ""
-            StartEdgeSpeech(sourceText, "zh-CN-XiaoyiNeural")
+            StartEdgeSpeech(sourceText, CONFIG.SpeechVoice)
     }
     catch Error as err
     {
@@ -500,9 +544,9 @@ GetSelectedText()
 }
 
 
-PromptForText(windowTitle, submitLabel)
+PromptForText(windowTitle, submitLabel, showVoiceList := false)
 {
-    global ActiveInputDialog
+    global CONFIG, SPEECH_VOICES, ActiveInputDialog
 
     state := {
         Confirmed: false,
@@ -511,7 +555,8 @@ PromptForText(windowTitle, submitLabel)
     }
 
     inputGui := Gui(
-        "+Resize -MinimizeBox -MaximizeBox +MinSize360x200",
+        "+Resize -MinimizeBox -MaximizeBox +MinSize"
+            . (showVoiceList ? "460" : "360") . "x200",
         windowTitle
     )
     inputGui.MarginX := 10
@@ -523,6 +568,20 @@ PromptForText(windowTitle, submitLabel)
         "xm ym w440 h204 +Multi +WantReturn Background20242B cF1F3F5"
     )
     pinButton := inputGui.AddButton("xm y+10 w72 h26", "钉住")
+    voiceList := 0
+
+    if showVoiceList
+    {
+        voiceLabels := []
+
+        for item in SPEECH_VOICES
+            voiceLabels.Push(item.Label)
+
+        voiceList := inputGui.AddDropDownList("x90 yp w220", voiceLabels)
+        voiceList.Choose(GetSpeechVoiceIndex(CONFIG.SpeechVoice))
+        voiceList.OnEvent("Change", ChangeSpeechVoice)
+    }
+
     submitButton := inputGui.AddButton(
         "x318 yp w72 h26 Default",
         submitLabel
@@ -533,6 +592,7 @@ PromptForText(windowTitle, submitLabel)
         Gui: inputGui,
         Edit: inputEdit,
         PinButton: pinButton,
+        VoiceList: voiceList,
         SubmitButton: submitButton,
         CancelButton: cancelButton,
         State: state
@@ -551,10 +611,21 @@ PromptForText(windowTitle, submitLabel)
     inputGui.OnEvent("Escape", CancelTranslationInput.Bind(inputGui))
     inputGui.OnEvent(
         "Size",
-        ResizeInputWindow.Bind(inputEdit, pinButton, submitButton, cancelButton)
+        ResizeInputWindow.Bind(
+            inputEdit,
+            pinButton,
+            voiceList,
+            submitButton,
+            cancelButton
+        )
     )
 
-    ApplyDarkTheme(inputGui, inputEdit, pinButton, submitButton, cancelButton)
+    themedControls := [inputEdit, pinButton, submitButton, cancelButton]
+
+    if IsObject(voiceList)
+        themedControls.Push(voiceList)
+
+    ApplyDarkTheme(inputGui, themedControls*)
     inputGui.Show("w460 h260")
     WinSetTransparent(238, "ahk_id " . inputGui.Hwnd)
     inputEdit.Focus()
@@ -563,6 +634,18 @@ PromptForText(windowTitle, submitLabel)
     WinWaitClose("ahk_id " . inputGui.Hwnd)
     ActiveInputDialog := 0
     return state.Confirmed ? state.Text : ""
+}
+
+
+ChangeSpeechVoice(voiceList, *)
+{
+    global CONFIG, SPEECH_VOICES
+
+    if voiceList.Value < 1 || voiceList.Value > SPEECH_VOICES.Length
+        return
+
+    CONFIG.SpeechVoice := SPEECH_VOICES[voiceList.Value].Voice
+    WriteConfigSetting("SpeechVoice", CONFIG.SpeechVoice)
 }
 
 
@@ -699,6 +782,7 @@ CloseInactiveInputWindow(hwnd)
 ResizeInputWindow(
     inputEdit,
     pinButton,
+    voiceList,
     submitButton,
     cancelButton,
     guiObject,
@@ -712,6 +796,10 @@ ResizeInputWindow(
 
     inputEdit.Move(10, 10, Max(200, width - 20), Max(100, height - 56))
     pinButton.Move(10, height - 36)
+
+    if IsObject(voiceList)
+        voiceList.Move(width - 370, height - 36)
+
     submitButton.Move(width - 142, height - 36)
     cancelButton.Move(width - 62, height - 36)
     RedrawGuiWindow(guiObject)
@@ -1396,7 +1484,7 @@ ToggleResultPinned(*)
 
 SpeakCurrentTranslation(*)
 {
-    global ResultEdit, SpeechBusy
+    global CONFIG, ResultEdit, SpeechBusy
 
     if SpeechBusy
     {
@@ -1412,7 +1500,7 @@ SpeakCurrentTranslation(*)
     if text = ""
         return
 
-    StartEdgeSpeech(text, "zh-CN-XiaoyiNeural")
+    StartEdgeSpeech(text, CONFIG.SpeechVoice)
 }
 
 
