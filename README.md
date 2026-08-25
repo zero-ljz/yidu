@@ -1,5 +1,9 @@
 # 译读
 
+<p align="center">
+  <img src="assets/yidu-icon.png" width="128" alt="译读图标">
+</p>
+
 译读是一款使用 AutoHotkey v2 编写的 Windows 划词翻译与在线朗读工具。选中文字后按下快捷键，即可进行中英互译或朗读；未选中文字时，会自动打开输入窗口。
 
 ## 功能
@@ -27,7 +31,9 @@ git clone https://github.com/zero-ljz/yidu.git
 cd yidu
 ```
 
-安装 AutoHotkey v2 后，双击 `YiDu.ahk` 即可运行。
+安装 AutoHotkey v2 后，双击 `YiDu.ahk` 即可运行。请将 `YiDu.ico` 与脚本放在同一目录，以显示译读的托盘图标。
+
+需要编译为独立可执行文件时，可以使用 AutoHotkey 自带的 Ahk2Exe，并选择 `YiDu.ico` 作为图标。
 
 ## 使用方法
 

@@ -68,6 +68,7 @@ global SpeechWorkerRequestPath := ""
 global SpeechWorkerReadyPath := ""
 
 LoadConfig()
+SetApplicationIcon()
 EnsureConfiguredElevation()
 RegisterTranslationHotkey()
 RegisterSpeakHotkey()
@@ -78,6 +79,15 @@ OnExit(CleanupSpeech)
 SetupTrayMenu()
 SetTimer(EnsureSpeechWorker, -1)
 ShowStartupNotification()
+
+
+SetApplicationIcon()
+{
+    iconPath := A_ScriptDir . "\YiDu.ico"
+
+    if FileExist(iconPath)
+        try TraySetIcon(iconPath)
+}
 
 
 LoadConfig()
