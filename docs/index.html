@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="译读是一款轻量的 Windows 划词翻译与在线朗读工具。选中文字，按下快捷键，即刻翻译或朗读。">
+  <meta name="theme-color" content="#1b2024">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="译读 - Windows 划词翻译与在线朗读工具">
+  <meta property="og:description" content="划词即译，选文即读。免费、开源，无需 API Key。">
+  <meta property="og:url" content="https://yidu.iapp.run/">
+  <meta property="og:image" content="https://yidu.iapp.run/assets/yidu-icon.png">
+  <link rel="canonical" href="https://yidu.iapp.run/">
+  <link rel="icon" type="image/png" href="assets/yidu-icon.png">
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+  <script defer src="site.js"></script>
+  <title>译读 - Windows 划词翻译与在线朗读工具</title>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="#top" aria-label="译读首页">
+        <img src="assets/yidu-icon.png" width="36" height="36" alt="">
+        <span>译读</span>
+      </a>
+
+      <button class="nav-toggle" type="button" aria-label="打开导航" aria-expanded="false" aria-controls="site-nav" title="导航菜单">
+        <i data-lucide="menu" aria-hidden="true"></i>
+      </button>
+
+      <nav id="site-nav" class="site-nav" aria-label="主要导航">
+        <a href="#features">功能</a>
+        <a href="#shortcuts">快捷键</a>
+        <a href="#download">下载</a>
+        <a href="#privacy">隐私</a>
+        <a class="nav-github" href="https://github.com/zero-ljz/yidu" target="_blank" rel="noreferrer">
+          <i data-lucide="github" aria-hidden="true"></i>
+          <span>GitHub</span>
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section id="top" class="hero">
+      <img class="hero-icon" src="assets/yidu-icon.png" width="480" height="480" alt="译读应用图标">
+      <div class="container hero-inner">
+        <div class="hero-copy">
+          <p class="product-meta"><span></span>免费开源 · Windows</p>
+          <h1>译读</h1>
+          <p class="hero-tagline">划词即译，选文即读。</p>
+          <p class="hero-description">一款轻量的 Windows 划词翻译与在线朗读工具。无需切换窗口，也无需申请 API Key。</p>
+
+          <div class="hero-actions">
+            <a class="button button-primary" href="https://github.com/zero-ljz/yidu/releases/latest/download/YiDu.exe">
+              <i data-lucide="download" aria-hidden="true"></i>
+              <span>下载最新版</span>
+            </a>
+            <a class="button button-secondary" href="https://github.com/zero-ljz/yidu" target="_blank" rel="noreferrer">
+              <i data-lucide="github" aria-hidden="true"></i>
+              <span>查看源码</span>
+            </a>
+          </div>
+
+          <p class="download-note">
+            <i data-lucide="monitor-down" aria-hidden="true"></i>
+            适用于 Windows 10 / 11
+          </p>
+        </div>
+
+        <div class="shortcut-summary" aria-label="默认快捷键">
+          <div>
+            <span>翻译</span>
+            <kbd>Ctrl</kbd><b>+</b><kbd>F1</kbd>
+          </div>
+          <div>
+            <span>朗读</span>
+            <kbd>Ctrl</kbd><b>+</b><kbd>F2</kbd>
+          </div>
+          <div>
+            <span>配置</span>
+            <strong>托盘右键菜单</strong>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="features" class="features section-dark">
+      <div class="container">
+        <div class="section-heading">
+          <p>核心功能</p>
+          <h2>少一步切换，多一点专注</h2>
+        </div>
+
+        <div class="feature-grid">
+          <article>
+            <i data-lucide="languages" aria-hidden="true"></i>
+            <h3>中英互译</h3>
+            <p>自动识别文本语言，长文本自动分段，并在请求不稳定时重试。</p>
+          </article>
+          <article>
+            <i data-lucide="volume-2" aria-hidden="true"></i>
+            <h3>在线朗读</h3>
+            <p>提供普通话、方言、粤语、台湾腔及英语等多种在线音色。</p>
+          </article>
+          <article>
+            <i data-lucide="mouse-pointer-2" aria-hidden="true"></i>
+            <h3>就近浮窗</h3>
+            <p>结果显示在鼠标附近，支持复制、朗读、置顶与自由拖动。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="shortcuts" class="shortcuts-section">
+      <div class="container shortcuts-layout">
+        <div class="section-heading section-heading-dark">
+          <p>使用方式</p>
+          <h2>选中文字，按下快捷键</h2>
+          <span>没有选中文字时，译读会打开输入窗口。快捷键和显示位置均可调整。</span>
+        </div>
+
+        <div class="shortcut-list">
+          <div class="shortcut-row">
+            <span class="shortcut-number">01</span>
+            <div>
+              <strong>翻译选中的文本</strong>
+              <span>自动选择中文或英文作为目标语言</span>
+            </div>
+            <div class="key-group"><kbd>Ctrl</kbd><b>+</b><kbd>F1</kbd></div>
+          </div>
+          <div class="shortcut-row">
+            <span class="shortcut-number">02</span>
+            <div>
+              <strong>朗读选中的文本</strong>
+              <span>通过输入窗口选择喜欢的在线音色</span>
+            </div>
+            <div class="key-group"><kbd>Ctrl</kbd><b>+</b><kbd>F2</kbd></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="download" class="download-section">
+      <div class="container download-inner">
+        <div>
+          <p class="download-label">立即使用</p>
+          <h2>下载译读</h2>
+          <p>绿色单文件，下载后直接运行。首次启动可能会出现 Windows 安全提示，请确认文件来自本项目官方仓库。</p>
+        </div>
+        <div class="download-actions">
+          <a class="button button-light" href="https://github.com/zero-ljz/yidu/releases/latest/download/YiDu.exe">
+            <i data-lucide="download" aria-hidden="true"></i>
+            <span>下载 YiDu.exe</span>
+          </a>
+          <a class="text-link" href="https://github.com/zero-ljz/yidu/releases/latest" target="_blank" rel="noreferrer">
+            查看版本说明
+            <i data-lucide="external-link" aria-hidden="true"></i>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section id="privacy" class="details-section">
+      <div class="container details-grid">
+        <div>
+          <i data-lucide="shield-check" aria-hidden="true"></i>
+          <h2>网络与隐私</h2>
+          <p>译读使用腾讯翻译相关接口处理翻译请求，使用 Microsoft Edge 在线语音服务合成朗读音频。请勿提交不适合上传到第三方服务的敏感文本。</p>
+        </div>
+        <div>
+          <i data-lucide="heart-handshake" aria-hidden="true"></i>
+          <h2>开源与反馈</h2>
+          <p>译读采用 MIT 许可证开源，由 zero-ljz（空心）开发和维护。</p>
+          <div class="contact-links">
+            <a href="https://github.com/zero-ljz/yidu/issues" target="_blank" rel="noreferrer">提交问题</a>
+            <a href="mailto:hi@iapp.run">hi@iapp.run</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <img src="assets/yidu-icon.png" width="30" height="30" alt="">
+        <span>译读</span>
+      </div>
+      <p>© <span id="current-year">2026</span> zero-ljz（空心） · MIT License</p>
+      <div>
+        <a href="https://github.com/zero-ljz/yidu" target="_blank" rel="noreferrer">GitHub</a>
+        <a href="mailto:hi@iapp.run">反馈邮箱</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
