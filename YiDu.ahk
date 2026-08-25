@@ -38,8 +38,8 @@ global SPEECH_VOICES := [
     {Label: "Guy · 英语男声", Voice: "en-US-GuyNeural"}
 ]
 
-global CONFIG_PATH := A_WorkingDir . "\translate_v2.ini"
-global AUTOSTART_SHORTCUT := A_Startup . "\WeChatTranslateV2.lnk"
+global CONFIG_PATH := A_ScriptDir . "\YiDu.ini"
+global AUTOSTART_SHORTCUT := A_Startup . "\YiDu.lnk"
 
 global TranslationBusy := false
 global ResultGui := 0
@@ -177,14 +177,14 @@ EnsureConfiguredElevation()
 
     try
     {
-        Run(GetLaunchCommand(true), A_WorkingDir)
+        Run(GetLaunchCommand(true), A_ScriptDir)
         ExitApp()
     }
     catch Error as err
     {
         MsgBox(
             "无法以管理员身份启动：`n" . err.Message,
-            "微信翻译",
+            "译读",
             "Icon!"
         )
         ExitApp()
@@ -206,7 +206,7 @@ RegisterTranslationHotkey()
         MsgBox(
             "配置文件中的翻译快捷键无效：" . invalidHotkey
                 . "`n已恢复为 ^F1。",
-            "微信翻译",
+            "译读",
             "Icon!"
         )
     }
@@ -235,7 +235,7 @@ RegisterSpeakHotkey()
         MsgBox(
             "配置文件中的朗读快捷键无效：" . invalidHotkey
                 . "`n已恢复为 " . CONFIG.SpeakHotkey . "。",
-            "微信翻译",
+            "译读",
             "Icon!"
         )
     }
@@ -270,7 +270,7 @@ SetupTrayMenu()
     A_TrayMenu.Add("退出", (*) => ExitApp())
     A_TrayMenu.Default := translateMenuText
     A_TrayMenu.ClickCount := 1
-    A_IconTip := "微信翻译 (翻译 " . CONFIG.Hotkey
+    A_IconTip := "译读 (翻译 " . CONFIG.Hotkey
         . "，朗读 " . CONFIG.SpeakHotkey . ")"
 }
 
@@ -282,7 +282,7 @@ ShowStartupNotification()
     TrayTip(
         "已启动：" . CONFIG.Hotkey . " 翻译，"
             . CONFIG.SpeakHotkey . " 朗读。",
-        "微信翻译",
+        "译读",
         1
     )
 }
@@ -307,7 +307,7 @@ ToggleAutostart(*)
     }
     catch Error as err
     {
-        MsgBox("修改开机自启失败：`n" . err.Message, "微信翻译", "Icon!")
+        MsgBox("修改开机自启失败：`n" . err.Message, "译读", "Icon!")
     }
 }
 
@@ -336,8 +336,8 @@ CreateAutostartShortcut()
         shortcut.Arguments := QuoteCommandArgument(A_ScriptFullPath)
     }
 
-    shortcut.WorkingDirectory := A_WorkingDir
-    shortcut.Description := "微信翻译"
+    shortcut.WorkingDirectory := A_ScriptDir
+    shortcut.Description := "译读"
     shortcut.IconLocation := A_IsCompiled ? A_ScriptFullPath : A_AhkPath
     shortcut.Save()
 }
@@ -352,7 +352,7 @@ ToggleRunAsAdmin(*)
     try WriteConfigSetting("RunAsAdmin", newValue ? 1 : 0)
     catch Error as err
     {
-        MsgBox("保存管理员启动设置失败：`n" . err.Message, "微信翻译", "Icon!")
+        MsgBox("保存管理员启动设置失败：`n" . err.Message, "译读", "Icon!")
         return
     }
 
@@ -371,7 +371,7 @@ ToggleRunAsAdmin(*)
 
     try
     {
-        Run(GetLaunchCommand(true), A_WorkingDir)
+        Run(GetLaunchCommand(true), A_ScriptDir)
         ExitApp()
     }
     catch Error as err
@@ -381,7 +381,7 @@ ToggleRunAsAdmin(*)
         A_TrayMenu.Uncheck("以管理员身份启动")
         MsgBox(
             "未能以管理员身份重新启动，已撤销该设置：`n" . err.Message,
-            "微信翻译",
+            "译读",
             "Icon!"
         )
     }
@@ -515,7 +515,7 @@ SpeakFromHotkey(*)
     }
     catch Error as err
     {
-        TrayTip("无法朗读：" . err.Message, "微信翻译朗读", 2)
+        TrayTip("无法朗读：" . err.Message, "译读朗读", 2)
     }
 }
 
@@ -1053,7 +1053,7 @@ ParseTranslationResponse(request)
     status := request.Status
 
     if status < 200 || status >= 300
-        throw Error("微信翻译返回 HTTP " . status . "。")
+        throw Error("翻译服务返回 HTTP " . status . "。")
 
     try
     {
@@ -1061,7 +1061,7 @@ ParseTranslationResponse(request)
     }
     catch Error
     {
-        throw Error("微信翻译响应解析失败。")
+        throw Error("翻译服务响应解析失败。")
     }
 
     if !(response is Map)
@@ -1069,7 +1069,7 @@ ParseTranslationResponse(request)
         || Type(response["targetText"]) != "String"
         || Trim(response["targetText"]) = ""
     {
-        throw Error("微信翻译接口返回异常。")
+        throw Error("翻译服务接口返回异常。")
     }
 
     return response["targetText"]
@@ -1515,14 +1515,14 @@ StartEdgeSpeech(text, voice)
 
     if !EnsureSpeechWorker()
     {
-        TrayTip("无法启动系统语音工作进程。", "微信翻译朗读", 2)
+        TrayTip("无法启动系统语音工作进程。", "译读朗读", 2)
         return
     }
 
     uniqueId := DllCall("GetCurrentProcessId", "UInt") . "_" . A_TickCount
-    SpeechAudioPath := A_Temp . "\WeChatTranslateTTS_" . uniqueId . ".mp3"
-    SpeechErrorPath := A_Temp . "\WeChatTranslateTTS_" . uniqueId . ".error"
-    SpeechDonePath := A_Temp . "\WeChatTranslateTTS_" . uniqueId . ".done"
+    SpeechAudioPath := A_Temp . "\YiDuTTS_" . uniqueId . ".mp3"
+    SpeechErrorPath := A_Temp . "\YiDuTTS_" . uniqueId . ".error"
+    SpeechDonePath := A_Temp . "\YiDuTTS_" . uniqueId . ".done"
     requestTempPath := SpeechWorkerRequestPath . ".tmp"
     payload := Base64EncodeUtf8(text) . "`n"
         . Base64EncodeUtf8(voice) . "`n"
@@ -1546,7 +1546,7 @@ StartEdgeSpeech(text, voice)
         StopSpeech()
         TrayTip(
             "无法提交语音合成任务：" . err.Message,
-            "微信翻译朗读",
+            "译读朗读",
             2
         )
         return
@@ -1577,14 +1577,14 @@ CheckSpeechSynthesis()
     if A_TickCount - SpeechStartedAt >= SpeechTimeoutMs
     {
         StopSpeech()
-        TrayTip("在线语音合成超时，请稍后重试。", "微信翻译朗读", 2)
+        TrayTip("在线语音合成超时，请稍后重试。", "译读朗读", 2)
         return
     }
 
     if !SpeechWorkerProcessId || !ProcessExist(SpeechWorkerProcessId)
     {
         StopSpeech()
-        TrayTip("在线语音工作进程意外退出。", "微信翻译朗读", 2)
+        TrayTip("在线语音工作进程意外退出。", "译读朗读", 2)
         return
     }
 
@@ -1609,7 +1609,7 @@ CheckSpeechSynthesis()
         StopSpeech()
         TrayTip(
             "在线语音合成失败：" . errorMessage,
-            "微信翻译朗读",
+            "译读朗读",
             2
         )
         return
@@ -1625,7 +1625,7 @@ CheckSpeechSynthesis()
     catch Error as err
     {
         StopSpeech()
-        TrayTip("无法播放语音：" . err.Message, "微信翻译朗读", 2)
+        TrayTip("无法播放语音：" . err.Message, "译读朗读", 2)
     }
 }
 
@@ -1634,7 +1634,7 @@ PlaySpeechAudio(audioPath)
 {
     global SpeechMciAlias
 
-    SpeechMciAlias := "WeChatTranslateTTS"
+    SpeechMciAlias := "YiDuTTS"
         . DllCall("GetCurrentProcessId", "UInt")
     quotedPath := Chr(34) . audioPath . Chr(34)
     result := MciSend(
@@ -1733,11 +1733,11 @@ EnsureSpeechWorker(*)
     StopSpeechWorker()
     workerId := DllCall("GetCurrentProcessId", "UInt")
     SpeechWorkerScriptPath := A_Temp
-        . "\WeChatTranslateTTS_Worker_" . workerId . ".ps1"
+        . "\YiDuTTS_Worker_" . workerId . ".ps1"
     SpeechWorkerRequestPath := A_Temp
-        . "\WeChatTranslateTTS_Worker_" . workerId . ".request"
+        . "\YiDuTTS_Worker_" . workerId . ".request"
     SpeechWorkerReadyPath := A_Temp
-        . "\WeChatTranslateTTS_Worker_" . workerId . ".ready"
+        . "\YiDuTTS_Worker_" . workerId . ".ready"
 
     for staleWorkerFile in [
         SpeechWorkerScriptPath,
