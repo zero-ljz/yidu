@@ -51,6 +51,7 @@ global ResultCloseButton := 0
 global ResultPinned := false
 global ShowResultAtMouse := true
 global ResultManualPosition := 0
+global AboutGui := 0
 global ActiveInputDialog := 0
 global ActiveTranslationRequest := 0
 global SpeechAudioPath := ""
@@ -267,11 +268,88 @@ SetupTrayMenu()
         A_TrayMenu.Check("以管理员身份启动")
 
     A_TrayMenu.Add()
+    A_TrayMenu.Add("关于译读", ShowAboutDialog)
+    A_TrayMenu.Add()
     A_TrayMenu.Add("退出", (*) => ExitApp())
     A_TrayMenu.Default := translateMenuText
     A_TrayMenu.ClickCount := 1
     A_IconTip := "译读 (翻译 " . CONFIG.Hotkey
         . "，朗读 " . CONFIG.SpeakHotkey . ")"
+}
+
+
+ShowAboutDialog(*)
+{
+    global AboutGui
+
+    if IsObject(AboutGui)
+    {
+        try
+        {
+            WinActivate("ahk_id " . AboutGui.Hwnd)
+            return
+        }
+
+        AboutGui := 0
+    }
+
+    aboutWindow := Gui("-MinimizeBox -MaximizeBox", "关于译读")
+    aboutWindow.MarginX := 18
+    aboutWindow.MarginY := 16
+    aboutWindow.BackColor := "171A1F"
+
+    aboutWindow.SetFont("s16 w600 cF1F3F5", "Microsoft YaHei UI")
+    aboutWindow.AddText("xm ym", "译读")
+    aboutWindow.SetFont("s9 cA7ADB7", "Microsoft YaHei UI")
+    aboutWindow.AddText(
+        "xm y+4 w394",
+        "Windows 划词翻译与在线朗读工具"
+    )
+
+    aboutWindow.SetFont("s10 cF1F3F5", "Microsoft YaHei UI")
+    aboutWindow.AddText("xm y+18 w76", "软件作者")
+    aboutWindow.AddText("x+8 yp w300", "zero-ljz（空心）")
+    aboutWindow.AddText("xm y+12 w76", "开源仓库")
+    repositoryLink := aboutWindow.AddLink(
+        "x+8 yp w300",
+        "<a href=`"https://github.com/zero-ljz/yidu`">"
+            . "github.com/zero-ljz/yidu</a>"
+    )
+    aboutWindow.AddText("xm y+12 w76", "官方网站")
+    websiteLink := aboutWindow.AddLink(
+        "x+8 yp w300",
+        "<a href=`"https://yidu.iapp.run`">yidu.iapp.run</a>"
+    )
+    aboutWindow.AddText("xm y+12 w76", "反馈邮箱")
+    emailLink := aboutWindow.AddLink(
+        "x+8 yp w300",
+        "<a href=`"mailto:hi@iapp.run`">hi@iapp.run</a>"
+    )
+
+    closeButton := aboutWindow.AddButton("x334 y+20 w78 h28 Default", "关闭")
+    closeButton.OnEvent("Click", CloseAboutDialog.Bind(aboutWindow))
+    aboutWindow.OnEvent("Close", CloseAboutDialog)
+    aboutWindow.OnEvent("Escape", CloseAboutDialog)
+    ApplyDarkTheme(
+        aboutWindow,
+        repositoryLink,
+        websiteLink,
+        emailLink,
+        closeButton
+    )
+
+    AboutGui := aboutWindow
+    aboutWindow.Show("w430 h252")
+    RedrawGuiWindow(aboutWindow)
+}
+
+
+CloseAboutDialog(aboutWindow, *)
+{
+    global AboutGui
+
+    AboutGui := 0
+    try aboutWindow.Destroy()
 }
 
 

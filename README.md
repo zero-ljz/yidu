@@ -43,6 +43,7 @@ cd yidu
 - 在鼠标指针处显示结果
 - 开机自启
 - 以管理员身份启动
+- 关于译读，包括作者、开源仓库、官方网站和反馈邮箱
 
 ## 配置
 
@@ -72,6 +73,13 @@ ShowResultAtMouse=1
 译读使用腾讯翻译相关接口处理翻译请求，使用 Microsoft Edge 在线语音服务合成朗读音频。翻译或朗读时，对应文本会发送到第三方在线服务，请勿处理不适合上传的敏感内容。
 
 这些在线接口可能随服务方调整而发生变化，稳定性和可用性不由本项目保证。
+
+## 联系与反馈
+
+- 软件作者：zero-ljz（空心）
+- 开源仓库：[github.com/zero-ljz/yidu](https://github.com/zero-ljz/yidu)
+- 官方网站：[yidu.iapp.run](https://yidu.iapp.run)
+- 反馈邮箱：[hi@iapp.run](mailto:hi@iapp.run)
 
 ## 许可证
 
