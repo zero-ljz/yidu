@@ -1,9 +1,15 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Force
+;@Ahk2Exe-SetName 译读
+;@Ahk2Exe-SetCompanyName zero-ljz（空心）
+;@Ahk2Exe-SetDescription 译读
+;@Ahk2Exe-SetCopyright Copyright (c) 2026 zero-ljz
+;@Ahk2Exe-SetVersion 1.0.0.0
 
 SendMode "Input"
 CoordMode "Mouse", "Screen"
 
+global APP_VERSION := "1.0.0"
 global CONFIG := {
     Hotkey: "^F1",
     SpeakHotkey: "^F2",
@@ -216,7 +222,7 @@ RegisterTranslationHotkey()
         Hotkey(CONFIG.Hotkey, TranslateFromHotkey)
         MsgBox(
             "配置文件中的翻译快捷键无效：" . invalidHotkey
-                . "`n已恢复为 ^F1。",
+                . "`n已恢复为 " . FormatHotkey(CONFIG.Hotkey) . "。",
             "译读",
             "Icon!"
         )
@@ -245,7 +251,7 @@ RegisterSpeakHotkey()
         Hotkey(CONFIG.SpeakHotkey, SpeakFromHotkey)
         MsgBox(
             "配置文件中的朗读快捷键无效：" . invalidHotkey
-                . "`n已恢复为 " . CONFIG.SpeakHotkey . "。",
+                . "`n已恢复为 " . FormatHotkey(CONFIG.SpeakHotkey) . "。",
             "译读",
             "Icon!"
         )
@@ -258,8 +264,10 @@ SetupTrayMenu()
     global CONFIG, ShowResultAtMouse
 
     A_TrayMenu.Delete()
-    translateMenuText := "翻译`t" . CONFIG.Hotkey
-    speakMenuText := "朗读`t" . CONFIG.SpeakHotkey
+    translateHotkeyText := FormatHotkey(CONFIG.Hotkey)
+    speakHotkeyText := FormatHotkey(CONFIG.SpeakHotkey)
+    translateMenuText := "翻译`t" . translateHotkeyText
+    speakMenuText := "朗读`t" . speakHotkeyText
     A_TrayMenu.Add(translateMenuText, TranslateFromHotkey)
     A_TrayMenu.Add(speakMenuText, SpeakFromHotkey)
     A_TrayMenu.Add("在鼠标指针处显示结果", ToggleResultAtMouse)
@@ -283,14 +291,18 @@ SetupTrayMenu()
     A_TrayMenu.Add("退出", (*) => ExitApp())
     A_TrayMenu.Default := translateMenuText
     A_TrayMenu.ClickCount := 1
-    A_IconTip := "译读 (翻译 " . CONFIG.Hotkey
-        . "，朗读 " . CONFIG.SpeakHotkey . ")"
+    A_IconTip := SubStr(
+        "译读 (翻译 " . translateHotkeyText
+            . "，朗读 " . speakHotkeyText . ")",
+        1,
+        127
+    )
 }
 
 
 ShowAboutDialog(*)
 {
-    global AboutGui
+    global APP_VERSION, AboutGui
 
     if IsObject(AboutGui)
     {
@@ -317,7 +329,9 @@ ShowAboutDialog(*)
     )
 
     aboutWindow.SetFont("s10 cF1F3F5", "Microsoft YaHei UI")
-    aboutWindow.AddText("xm y+18 w76", "软件作者")
+    aboutWindow.AddText("xm y+18 w76", "软件版本")
+    aboutWindow.AddText("x+8 yp w300", APP_VERSION)
+    aboutWindow.AddText("xm y+12 w76", "软件作者")
     aboutWindow.AddText("x+8 yp w300", "zero-ljz（空心）")
     aboutWindow.AddText("xm y+12 w76", "开源仓库")
     repositoryLink := aboutWindow.AddLink(
@@ -349,7 +363,7 @@ ShowAboutDialog(*)
     )
 
     AboutGui := aboutWindow
-    aboutWindow.Show("w430 h252")
+    aboutWindow.Show("w430 h276")
     RedrawGuiWindow(aboutWindow)
 }
 
@@ -368,11 +382,261 @@ ShowStartupNotification()
     global CONFIG
 
     TrayTip(
-        "已启动：" . CONFIG.Hotkey . " 翻译，"
-            . CONFIG.SpeakHotkey . " 朗读。",
+        "已启动：" . FormatHotkey(CONFIG.Hotkey) . " 翻译，"
+            . FormatHotkey(CONFIG.SpeakHotkey) . " 朗读。",
         "译读",
         1
     )
+}
+
+
+FormatHotkey(hotkey)
+{
+    hotkey := Trim(hotkey)
+
+    if hotkey = ""
+        return ""
+
+    keyUpPosition := RegExMatch(hotkey, "i)\s+up$")
+    isKeyUp := keyUpPosition > 0
+
+    if isKeyUp
+        hotkey := RTrim(SubStr(hotkey, 1, keyUpPosition - 1))
+
+    if RegExMatch(hotkey, "^(.*?)\s+&\s+(.*?)$", &combination)
+    {
+        displayText := FormatHotkeyChord(combination[1])
+            . " + " . FormatHotkeyChord(combination[2])
+    }
+    else
+        displayText := FormatHotkeyChord(hotkey)
+
+    return displayText . (isKeyUp ? "（松开时）" : "")
+}
+
+
+FormatHotkeyChord(chord)
+{
+    chord := Trim(chord)
+    modifiers := []
+    position := 1
+    chordLength := StrLen(chord)
+    lastModifierSymbol := ""
+    lastModifierSide := ""
+
+    while position <= chordLength
+    {
+        symbol := SubStr(chord, position, 1)
+
+        if symbol = "*" || symbol = "~" || symbol = "$"
+        {
+            position += 1
+            continue
+        }
+
+        side := ""
+
+        if (symbol = "<" || symbol = ">")
+            && IsHotkeyModifierSymbol(SubStr(chord, position + 1, 1))
+        {
+            side := symbol
+            symbol := SubStr(chord, position + 1, 1)
+            position += 2
+        }
+        else if IsHotkeyModifierSymbol(symbol)
+            position += 1
+        else
+            break
+
+        lastModifierSymbol := symbol
+        lastModifierSide := side
+        modifiers.Push(FormatHotkeyModifier(symbol, side))
+    }
+
+    key := Trim(SubStr(chord, position))
+
+    if key = ""
+    {
+        if modifiers.Length = 0
+            return chord
+
+        modifiers.Pop()
+        keyText := lastModifierSide = ""
+            ? lastModifierSymbol
+            : FormatHotkeyModifier(lastModifierSymbol, lastModifierSide)
+    }
+    else
+        keyText := FormatHotkeyKey(key)
+
+    displayText := ""
+
+    for modifier in modifiers
+        displayText .= (displayText = "" ? "" : " + ") . modifier
+
+    return displayText . (displayText = "" ? "" : " + ") . keyText
+}
+
+
+IsHotkeyModifierSymbol(symbol)
+{
+    return symbol = "#" || symbol = "!" || symbol = "^" || symbol = "+"
+}
+
+
+FormatHotkeyModifier(symbol, side := "")
+{
+    switch symbol
+    {
+        case "#": name := "Win"
+        case "!": name := "Alt"
+        case "^": name := "Ctrl"
+        case "+": name := "Shift"
+        default: return symbol
+    }
+
+    if side = "<"
+        return "左 " . name
+
+    if side = ">"
+        return "右 " . name
+
+    return name
+}
+
+
+FormatHotkeyKey(key)
+{
+    static names := Map(
+        "esc", "Esc",
+        "escape", "Esc",
+        "space", "空格",
+        "tab", "Tab",
+        "enter", "Enter",
+        "return", "Enter",
+        "backspace", "Backspace",
+        "bs", "Backspace",
+        "delete", "Delete",
+        "del", "Delete",
+        "insert", "Insert",
+        "ins", "Insert",
+        "home", "Home",
+        "end", "End",
+        "pgup", "Page Up",
+        "pgdn", "Page Down",
+        "up", "↑",
+        "down", "↓",
+        "left", "←",
+        "right", "→",
+        "capslock", "Caps Lock",
+        "scrolllock", "Scroll Lock",
+        "numlock", "Num Lock",
+        "printscreen", "Print Screen",
+        "pause", "Pause",
+        "break", "Break",
+        "ctrlbreak", "Ctrl + Break",
+        "appskey", "菜单键",
+        "help", "Help",
+        "sleep", "Sleep",
+        "ctrl", "Ctrl",
+        "control", "Ctrl",
+        "lctrl", "左 Ctrl",
+        "lcontrol", "左 Ctrl",
+        "rctrl", "右 Ctrl",
+        "rcontrol", "右 Ctrl",
+        "shift", "Shift",
+        "lshift", "左 Shift",
+        "rshift", "右 Shift",
+        "alt", "Alt",
+        "lalt", "左 Alt",
+        "ralt", "右 Alt",
+        "altgr", "AltGr",
+        "lwin", "左 Win",
+        "rwin", "右 Win",
+        "numpaddot", "小键盘 .",
+        "numpaddiv", "小键盘 /",
+        "numpadmult", "小键盘 *",
+        "numpadadd", "小键盘 +",
+        "numpadsub", "小键盘 -",
+        "numpadenter", "小键盘 Enter",
+        "numpadins", "小键盘 Insert",
+        "numpadend", "小键盘 End",
+        "numpaddown", "小键盘 ↓",
+        "numpadpgdn", "小键盘 Page Down",
+        "numpadleft", "小键盘 ←",
+        "numpadclear", "小键盘 Clear",
+        "numpadright", "小键盘 →",
+        "numpadhome", "小键盘 Home",
+        "numpadup", "小键盘 ↑",
+        "numpadpgup", "小键盘 Page Up",
+        "numpaddel", "小键盘 Delete",
+        "lbutton", "鼠标左键",
+        "rbutton", "鼠标右键",
+        "mbutton", "鼠标中键",
+        "xbutton1", "鼠标侧键 1",
+        "xbutton2", "鼠标侧键 2",
+        "wheelup", "滚轮向上",
+        "wheeldown", "滚轮向下",
+        "wheelleft", "滚轮向左",
+        "wheelright", "滚轮向右",
+        "browser_back", "浏览器后退",
+        "browser_forward", "浏览器前进",
+        "browser_refresh", "浏览器刷新",
+        "browser_stop", "浏览器停止",
+        "browser_search", "浏览器搜索",
+        "browser_favorites", "浏览器收藏夹",
+        "browser_home", "浏览器主页",
+        "volume_mute", "静音",
+        "volume_down", "降低音量",
+        "volume_up", "提高音量",
+        "media_next", "下一曲",
+        "media_prev", "上一曲",
+        "media_stop", "停止播放",
+        "media_play_pause", "播放/暂停",
+        "launch_mail", "启动邮件",
+        "launch_media", "启动媒体播放器",
+        "launch_app1", "启动应用 1",
+        "launch_app2", "启动应用 2"
+    )
+
+    resolvedKey := key
+
+    try
+    {
+        canonicalName := GetKeyName(key)
+
+        if canonicalName != ""
+            resolvedKey := canonicalName
+    }
+
+    lowerKey := StrLower(resolvedKey)
+
+    if names.Has(lowerKey)
+        return names[lowerKey]
+
+    if RegExMatch(lowerKey, "^numpad([0-9])$", &numpadMatch)
+        return "小键盘 " . numpadMatch[1]
+
+    if RegExMatch(lowerKey, "^([0-9]*)joy([0-9]+)$", &joystickMatch)
+    {
+        joystickNumber := joystickMatch[1]
+        buttonNumber := joystickMatch[2]
+        return (joystickNumber = "" ? "手柄" : "手柄 " . joystickNumber)
+            . " 按钮 " . buttonNumber
+    }
+
+    if RegExMatch(lowerKey, "^f([1-9]|1[0-9]|2[0-4])$")
+        return StrUpper(resolvedKey)
+
+    if RegExMatch(
+        lowerKey,
+        "^(vk[0-9a-f]{2}|sc[0-9a-f]{3}|vk[0-9a-f]{2}sc[0-9a-f]{3})$"
+    )
+        return StrUpper(resolvedKey)
+
+    if StrLen(resolvedKey) = 1
+        return StrUpper(resolvedKey)
+
+    return resolvedKey
 }
 
 
@@ -783,7 +1047,7 @@ HandleInputKeyDown(wParam, lParam, message, hwnd)
     if hwnd != ActiveInputDialog.Edit.Hwnd || wParam != 0x0D
         return
 
-    if GetKeyState("Ctrl")
+    if GetKeyState("Shift")
     {
         newline := "`r`n"
         SendMessage(
@@ -1840,7 +2104,8 @@ EnsureSpeechWorker(*)
 
     script := BuildEdgeSpeechWorkerPowerShell(
         SpeechWorkerRequestPath,
-        SpeechWorkerReadyPath
+        SpeechWorkerReadyPath,
+        workerId
     )
 
     try
@@ -1938,13 +2203,16 @@ GetMciErrorMessage(errorCode)
 }
 
 
-BuildEdgeSpeechWorkerPowerShell(requestPath, readyPath)
+BuildEdgeSpeechWorkerPowerShell(requestPath, readyPath, parentProcessId)
 {
     script := '
 (
 $ErrorActionPreference = 'Stop'
 $requestPath = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__REQUEST__'))
 $readyPath = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__READY__'))
+$parentProcessId = __PARENT_PROCESS_ID__
+try { $parentProcess = [Diagnostics.Process]::GetProcessById($parentProcessId) }
+catch { exit }
 Add-Type -TypeDefinition @'
 using System;
 using System.IO;
@@ -2305,7 +2573,7 @@ try { Open-EdgeSpeechConnection } catch { Close-EdgeSpeechConnection }
 [IO.File]::WriteAllText($readyPath, '1', [Text.UTF8Encoding]::new($false))
 
 try {
-    while ($true) {
+    while (-not $parentProcess.HasExited) {
         if (Test-Path -LiteralPath $requestPath) {
             $audioPath = $null
             $errorPath = $null
@@ -2358,14 +2626,21 @@ try {
 }
 finally {
     Close-EdgeSpeechConnection
-    if (Test-Path -LiteralPath $readyPath) {
-        Remove-Item -LiteralPath $readyPath -Force -ErrorAction SilentlyContinue
+    try { $parentProcess.Dispose() } catch {}
+    foreach ($workerFile in @($requestPath, $requestPath + '.tmp', $readyPath)) {
+        if (Test-Path -LiteralPath $workerFile) {
+            Remove-Item -LiteralPath $workerFile -Force -ErrorAction SilentlyContinue
+        }
+    }
+    if ($PSCommandPath -and (Test-Path -LiteralPath $PSCommandPath)) {
+        Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
     }
 }
 )'
 
     script := StrReplace(script, "__REQUEST__", Base64EncodeUtf8(requestPath))
-    return StrReplace(script, "__READY__", Base64EncodeUtf8(readyPath))
+    script := StrReplace(script, "__READY__", Base64EncodeUtf8(readyPath))
+    return StrReplace(script, "__PARENT_PROCESS_ID__", parentProcessId)
 }
 
 
