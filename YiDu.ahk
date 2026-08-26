@@ -4,16 +4,17 @@
 ;@Ahk2Exe-SetCompanyName zero-ljz（空心）
 ;@Ahk2Exe-SetDescription 译读
 ;@Ahk2Exe-SetCopyright Copyright (c) 2026 zero-ljz
-;@Ahk2Exe-SetVersion 1.0.0.0
+;@Ahk2Exe-SetVersion 1.1.0.0
 
 SendMode "Input"
 CoordMode "Mouse", "Screen"
 
-global APP_VERSION := "1.0.0"
+global APP_VERSION := "1.1.0"
 global CONFIG := {
     Hotkey: "^F1",
     SpeakHotkey: "^F2",
     SpeechVoice: "zh-CN-XiaoyiNeural",
+    TranslationService: "tencent",
     RunAsAdmin: false,
     ShowResultAtMouse: true,
     RequestTimeoutMs: 10000,
@@ -44,6 +45,12 @@ global SPEECH_VOICES := [
     {Label: "Guy · 英语男声", Voice: "en-US-GuyNeural"}
 ]
 
+global TRANSLATION_SERVICES := [
+    {Label: "腾讯翻译", Service: "tencent"},
+    {Label: "有道翻译", Service: "youdao"},
+    {Label: "谷歌翻译", Service: "google"}
+]
+
 global CONFIG_PATH := A_ScriptDir . "\YiDu.ini"
 global AUTOSTART_SHORTCUT := A_Startup . "\YiDu.lnk"
 
@@ -60,6 +67,8 @@ global ResultManualPosition := 0
 global AboutGui := 0
 global ActiveInputDialog := 0
 global ActiveTranslationRequest := 0
+global TranslationServiceTrayMenu := 0
+global SpeechVoiceTrayMenu := 0
 global SpeechAudioPath := ""
 global SpeechErrorPath := ""
 global SpeechDonePath := ""
@@ -120,6 +129,16 @@ LoadConfig()
     if GetSpeechVoiceIndex(CONFIG.SpeechVoice) = 0
         CONFIG.SpeechVoice := "zh-CN-XiaoyiNeural"
 
+    CONFIG.TranslationService := Trim(IniRead(
+        CONFIG_PATH,
+        "Settings",
+        "TranslationService",
+        CONFIG.TranslationService
+    ))
+
+    if GetTranslationServiceIndex(CONFIG.TranslationService) = 0
+        CONFIG.TranslationService := "tencent"
+
     CONFIG.RunAsAdmin := ReadBooleanSetting("RunAsAdmin", CONFIG.RunAsAdmin)
     CONFIG.ShowResultAtMouse := ReadBooleanSetting(
         "ShowResultAtMouse",
@@ -136,6 +155,12 @@ CreateDefaultConfig()
     IniWrite(CONFIG.Hotkey, CONFIG_PATH, "Settings", "Hotkey")
     IniWrite(CONFIG.SpeakHotkey, CONFIG_PATH, "Settings", "SpeakHotkey")
     IniWrite(CONFIG.SpeechVoice, CONFIG_PATH, "Settings", "SpeechVoice")
+    IniWrite(
+        CONFIG.TranslationService,
+        CONFIG_PATH,
+        "Settings",
+        "TranslationService"
+    )
     IniWrite(CONFIG.RunAsAdmin ? 1 : 0, CONFIG_PATH, "Settings", "RunAsAdmin")
     IniWrite(
         CONFIG.ShowResultAtMouse ? 1 : 0,
@@ -153,6 +178,20 @@ GetSpeechVoiceIndex(voice)
     for index, item in SPEECH_VOICES
     {
         if item.Voice = voice
+            return index
+    }
+
+    return 0
+}
+
+
+GetTranslationServiceIndex(service)
+{
+    global TRANSLATION_SERVICES
+
+    for index, item in TRANSLATION_SERVICES
+    {
+        if item.Service = service
             return index
     }
 
@@ -262,6 +301,8 @@ RegisterSpeakHotkey()
 SetupTrayMenu()
 {
     global CONFIG, ShowResultAtMouse
+    global TRANSLATION_SERVICES, SPEECH_VOICES
+    global TranslationServiceTrayMenu, SpeechVoiceTrayMenu
 
     A_TrayMenu.Delete()
     translateHotkeyText := FormatHotkey(CONFIG.Hotkey)
@@ -270,6 +311,27 @@ SetupTrayMenu()
     speakMenuText := "朗读`t" . speakHotkeyText
     A_TrayMenu.Add(translateMenuText, TranslateFromHotkey)
     A_TrayMenu.Add(speakMenuText, SpeakFromHotkey)
+
+    TranslationServiceTrayMenu := Menu()
+
+    for item in TRANSLATION_SERVICES
+    {
+        TranslationServiceTrayMenu.Add(
+            item.Label,
+            SetTranslationService.Bind(item.Service)
+        )
+    }
+
+    UpdateTranslationServiceTrayChecks()
+    A_TrayMenu.Add("翻译服务", TranslationServiceTrayMenu)
+
+    SpeechVoiceTrayMenu := Menu()
+
+    for item in SPEECH_VOICES
+        SpeechVoiceTrayMenu.Add(item.Label, SetSpeechVoice.Bind(item.Voice))
+
+    UpdateSpeechVoiceTrayChecks()
+    A_TrayMenu.Add("语音角色", SpeechVoiceTrayMenu)
     A_TrayMenu.Add("在鼠标指针处显示结果", ToggleResultAtMouse)
 
     if ShowResultAtMouse
@@ -825,7 +887,7 @@ TranslateFromHotkey(*)
 
         if sourceText = ""
         {
-            sourceText := PromptForText("输入翻译内容", "翻译")
+            sourceText := PromptForText("输入翻译内容", "翻译", "translation")
 
             if sourceText = ""
             {
@@ -860,7 +922,7 @@ SpeakFromHotkey(*)
         sourceText := GetSelectedText()
 
         if sourceText = ""
-            sourceText := PromptForText("输入朗读内容", "朗读", true)
+            sourceText := PromptForText("输入朗读内容", "朗读", "voice")
 
         if sourceText != ""
             StartEdgeSpeech(sourceText, CONFIG.SpeechVoice)
@@ -896,9 +958,9 @@ GetSelectedText()
 }
 
 
-PromptForText(windowTitle, submitLabel, showVoiceList := false)
+PromptForText(windowTitle, submitLabel, selectorType := "")
 {
-    global CONFIG, SPEECH_VOICES, ActiveInputDialog
+    global CONFIG, SPEECH_VOICES, TRANSLATION_SERVICES, ActiveInputDialog
 
     state := {
         Confirmed: false,
@@ -908,7 +970,7 @@ PromptForText(windowTitle, submitLabel, showVoiceList := false)
 
     inputGui := Gui(
         "+Resize -MinimizeBox -MaximizeBox +MinSize"
-            . (showVoiceList ? "460" : "360") . "x200",
+            . (selectorType != "" ? "460" : "360") . "x200",
         windowTitle
     )
     inputGui.MarginX := 10
@@ -920,18 +982,29 @@ PromptForText(windowTitle, submitLabel, showVoiceList := false)
         "xm ym w440 h204 +Multi +WantReturn Background20242B cF1F3F5"
     )
     pinButton := inputGui.AddButton("xm y+10 w72 h26", "钉住")
-    voiceList := 0
+    selectorList := 0
 
-    if showVoiceList
+    if selectorType = "voice"
     {
         voiceLabels := []
 
         for item in SPEECH_VOICES
             voiceLabels.Push(item.Label)
 
-        voiceList := inputGui.AddDropDownList("x90 yp w220", voiceLabels)
-        voiceList.Choose(GetSpeechVoiceIndex(CONFIG.SpeechVoice))
-        voiceList.OnEvent("Change", ChangeSpeechVoice)
+        selectorList := inputGui.AddDropDownList("x90 yp w220", voiceLabels)
+        selectorList.Choose(GetSpeechVoiceIndex(CONFIG.SpeechVoice))
+        selectorList.OnEvent("Change", ChangeSpeechVoice)
+    }
+    else if selectorType = "translation"
+    {
+        serviceLabels := []
+
+        for item in TRANSLATION_SERVICES
+            serviceLabels.Push(item.Label)
+
+        selectorList := inputGui.AddDropDownList("x90 yp w220", serviceLabels)
+        selectorList.Choose(GetTranslationServiceIndex(CONFIG.TranslationService))
+        selectorList.OnEvent("Change", ChangeTranslationService)
     }
 
     submitButton := inputGui.AddButton(
@@ -940,11 +1013,14 @@ PromptForText(windowTitle, submitLabel, showVoiceList := false)
     )
     cancelButton := inputGui.AddButton("x+8 yp w52 h26", "取消")
 
+    if IsObject(selectorList)
+        CenterControlVertically(pinButton, selectorList)
+
     ActiveInputDialog := {
         Gui: inputGui,
         Edit: inputEdit,
         PinButton: pinButton,
-        VoiceList: voiceList,
+        SelectorList: selectorList,
         SubmitButton: submitButton,
         CancelButton: cancelButton,
         State: state
@@ -966,7 +1042,7 @@ PromptForText(windowTitle, submitLabel, showVoiceList := false)
         ResizeInputWindow.Bind(
             inputEdit,
             pinButton,
-            voiceList,
+            selectorList,
             submitButton,
             cancelButton
         )
@@ -974,8 +1050,8 @@ PromptForText(windowTitle, submitLabel, showVoiceList := false)
 
     themedControls := [inputEdit, pinButton, submitButton, cancelButton]
 
-    if IsObject(voiceList)
-        themedControls.Push(voiceList)
+    if IsObject(selectorList)
+        themedControls.Push(selectorList)
 
     ApplyDarkTheme(inputGui, themedControls*)
     inputGui.Show("w460 h260")
@@ -991,13 +1067,86 @@ PromptForText(windowTitle, submitLabel, showVoiceList := false)
 
 ChangeSpeechVoice(voiceList, *)
 {
-    global CONFIG, SPEECH_VOICES
+    global SPEECH_VOICES
 
     if voiceList.Value < 1 || voiceList.Value > SPEECH_VOICES.Length
         return
 
-    CONFIG.SpeechVoice := SPEECH_VOICES[voiceList.Value].Voice
+    SetSpeechVoice(SPEECH_VOICES[voiceList.Value].Voice)
+}
+
+
+ChangeTranslationService(serviceList, *)
+{
+    global TRANSLATION_SERVICES
+
+    if serviceList.Value < 1
+        || serviceList.Value > TRANSLATION_SERVICES.Length
+    {
+        return
+    }
+
+    SetTranslationService(TRANSLATION_SERVICES[serviceList.Value].Service)
+}
+
+
+SetSpeechVoice(voice, *)
+{
+    global CONFIG
+
+    if GetSpeechVoiceIndex(voice) = 0
+        return
+
+    CONFIG.SpeechVoice := voice
     WriteConfigSetting("SpeechVoice", CONFIG.SpeechVoice)
+    UpdateSpeechVoiceTrayChecks()
+}
+
+
+SetTranslationService(service, *)
+{
+    global CONFIG
+
+    if GetTranslationServiceIndex(service) = 0
+        return
+
+    CONFIG.TranslationService := service
+    WriteConfigSetting("TranslationService", CONFIG.TranslationService)
+    UpdateTranslationServiceTrayChecks()
+}
+
+
+UpdateSpeechVoiceTrayChecks()
+{
+    global CONFIG, SPEECH_VOICES, SpeechVoiceTrayMenu
+
+    if !IsObject(SpeechVoiceTrayMenu)
+        return
+
+    for item in SPEECH_VOICES
+    {
+        SpeechVoiceTrayMenu.Uncheck(item.Label)
+
+        if item.Voice = CONFIG.SpeechVoice
+            SpeechVoiceTrayMenu.Check(item.Label)
+    }
+}
+
+
+UpdateTranslationServiceTrayChecks()
+{
+    global CONFIG, TRANSLATION_SERVICES, TranslationServiceTrayMenu
+
+    if !IsObject(TranslationServiceTrayMenu)
+        return
+
+    for item in TRANSLATION_SERVICES
+    {
+        TranslationServiceTrayMenu.Uncheck(item.Label)
+
+        if item.Service = CONFIG.TranslationService
+            TranslationServiceTrayMenu.Check(item.Label)
+    }
 }
 
 
@@ -1134,7 +1283,7 @@ CloseInactiveInputWindow(hwnd)
 ResizeInputWindow(
     inputEdit,
     pinButton,
-    voiceList,
+    selectorList,
     submitButton,
     cancelButton,
     guiObject,
@@ -1149,12 +1298,24 @@ ResizeInputWindow(
     inputEdit.Move(10, 10, Max(200, width - 20), Max(100, height - 56))
     pinButton.Move(10, height - 36)
 
-    if IsObject(voiceList)
-        voiceList.Move(width - 370, height - 36)
+    if IsObject(selectorList)
+    {
+        selectorList.Move(width - 370)
+        CenterControlVertically(pinButton, selectorList)
+    }
 
     submitButton.Move(width - 142, height - 36)
     cancelButton.Move(width - 62, height - 36)
     RedrawGuiWindow(guiObject)
+}
+
+
+CenterControlVertically(referenceControl, targetControl)
+{
+    referenceControl.GetPos(, &referenceY, , &referenceHeight)
+    targetControl.GetPos(, , , &targetHeight)
+    targetY := referenceY + Floor((referenceHeight - targetHeight) / 2)
+    targetControl.Move(, targetY)
 }
 
 
@@ -1189,7 +1350,7 @@ GetTranslationTargetLanguage(text)
 
 StartTranslationRequest(sourceText, targetLanguage)
 {
-    global ActiveTranslationRequest
+    global CONFIG, ActiveTranslationRequest
 
     StopSpeech()
     chunks := SplitTranslationText(sourceText)
@@ -1198,6 +1359,7 @@ StartTranslationRequest(sourceText, targetLanguage)
         ChunkIndex: 0,
         Results: [],
         TargetLanguage: targetLanguage,
+        Service: CONFIG.TranslationService,
         Http: 0,
         StartedAt: 0,
         Attempt: 0,
@@ -1237,30 +1399,43 @@ StartNextTranslationChunk(retryCurrent := false)
     }
 
     sourceText := requestState.Chunks[requestState.ChunkIndex]
-    params := "source=auto"
-        . "&target=" . UrlEncode(requestState.TargetLanguage)
-        . "&sourceText=" . UrlEncode(sourceText)
-        . "&platform=WeChat_APP"
-        . "&candidateLangs=en%7Czh"
-        . "&guid=ahk_v2_" . A_TickCount . "_"
-        . requestState.ChunkIndex . "_" . requestState.Attempt
-
-    request := ComObject("WinHttp.WinHttpRequest.5.1")
-    request.SetTimeouts(
-        CONFIG.RequestTimeoutMs,
-        CONFIG.RequestTimeoutMs,
-        CONFIG.RequestTimeoutMs,
-        CONFIG.RequestTimeoutMs
+    requestOptions := BuildTranslationRequest(
+        requestState.Service,
+        sourceText,
+        requestState.TargetLanguage,
+        requestState.ChunkIndex,
+        requestState.Attempt
     )
-    request.Open("GET", CONFIG.ApiUrl . "?" . params, true)
-    request.SetRequestHeader("Content-Type", "application/json")
-    request.SetRequestHeader("Referer", CONFIG.Referer)
+
+    request := requestOptions.Transport = "xmlhttp"
+        ? ComObject("MSXML2.XMLHTTP.6.0")
+        : ComObject("WinHttp.WinHttpRequest.5.1")
+
+    if requestOptions.Transport = "winhttp"
+    {
+        request.SetTimeouts(
+            CONFIG.RequestTimeoutMs,
+            CONFIG.RequestTimeoutMs,
+            CONFIG.RequestTimeoutMs,
+            CONFIG.RequestTimeoutMs
+        )
+    }
+
+    request.Open(requestOptions.Method, requestOptions.Url, true)
+    request.SetRequestHeader("Content-Type", requestOptions.ContentType)
     request.SetRequestHeader("User-Agent", CONFIG.UserAgent)
+
+    if requestOptions.Referer != ""
+        request.SetRequestHeader("Referer", requestOptions.Referer)
+
     request.SetRequestHeader("Cache-Control", "no-cache")
 
     try
     {
-        request.Send()
+        if requestOptions.Body = ""
+            request.Send()
+        else
+            request.Send(requestOptions.Body)
     }
     catch Error as err
     {
@@ -1335,7 +1510,7 @@ CheckTranslationRequest()
 
     try
     {
-        if !requestState.Http.WaitForResponse(0)
+        if !IsTranslationResponseReady(requestState)
             return
     }
     catch Error as err
@@ -1355,7 +1530,10 @@ CheckTranslationRequest()
 
     try
     {
-        translatedText := ParseTranslationResponse(requestState.Http)
+        translatedText := ParseTranslationResponse(
+            requestState.Http,
+            requestState.Service
+        )
         requestState.Results.Push(translatedText)
 
         if requestState.ChunkIndex < requestState.Chunks.Length
@@ -1390,6 +1568,15 @@ CheckTranslationRequest()
 }
 
 
+IsTranslationResponseReady(requestState)
+{
+    if requestState.Service = "google"
+        return requestState.Http.readyState = 4
+
+    return requestState.Http.WaitForResponse(0)
+}
+
+
 FinishTranslationRequest()
 {
     global TranslationBusy, ActiveTranslationRequest
@@ -1400,7 +1587,58 @@ FinishTranslationRequest()
 }
 
 
-ParseTranslationResponse(request)
+BuildTranslationRequest(service, sourceText, targetLanguage, chunkIndex, attempt)
+{
+    global CONFIG
+
+    if service = "youdao"
+    {
+        return {
+            Method: "POST",
+            Url: "https://aidemo.youdao.com/trans",
+            Transport: "winhttp",
+            ContentType: "application/x-www-form-urlencoded; charset=UTF-8",
+            Referer: "https://ai.youdao.com/",
+            Body: "q=" . UrlEncode(sourceText) . "&from=Auto&to=Auto"
+        }
+    }
+
+    if service = "google"
+    {
+        googleTarget := targetLanguage = "zh" ? "zh-CN" : targetLanguage
+        params := "client=dict-chrome-ex&sl=auto&tl="
+            . UrlEncode(googleTarget) . "&q=" . UrlEncode(sourceText)
+
+        return {
+            Method: "GET",
+            Url: "https://clients5.google.com/translate_a/t?" . params,
+            Transport: "xmlhttp",
+            ContentType: "application/json",
+            Referer: "",
+            Body: ""
+        }
+    }
+
+    params := "source=auto"
+        . "&target=" . UrlEncode(targetLanguage)
+        . "&sourceText=" . UrlEncode(sourceText)
+        . "&platform=WeChat_APP"
+        . "&candidateLangs=en%7Czh"
+        . "&guid=ahk_v2_" . A_TickCount . "_"
+        . chunkIndex . "_" . attempt
+
+    return {
+        Method: "GET",
+        Url: CONFIG.ApiUrl . "?" . params,
+        Transport: "winhttp",
+        ContentType: "application/json",
+        Referer: CONFIG.Referer,
+        Body: ""
+    }
+}
+
+
+ParseTranslationResponse(request, service)
 {
     status := request.Status
 
@@ -1409,12 +1647,21 @@ ParseTranslationResponse(request)
 
     try
     {
-        response := JsonParser.Parse(request.ResponseText)
+        responseText := service = "tencent"
+            ? request.ResponseText
+            : ReadUtf8HttpResponse(request)
+        response := JsonParser.Parse(responseText)
     }
     catch Error
     {
         throw Error("翻译服务响应解析失败。")
     }
+
+    if service = "youdao"
+        return ParseYoudaoTranslationResponse(response)
+
+    if service = "google"
+        return ParseGoogleTranslationResponse(response)
 
     if !(response is Map)
         || !response.Has("targetText")
@@ -1425,6 +1672,96 @@ ParseTranslationResponse(request)
     }
 
     return response["targetText"]
+}
+
+
+ReadUtf8HttpResponse(request)
+{
+    stream := ComObject("ADODB.Stream")
+    stream.Type := 1
+    stream.Open()
+
+    try
+    {
+        stream.Write(request.ResponseBody)
+        stream.Position := 0
+        stream.Type := 2
+        stream.Charset := "utf-8"
+        responseText := stream.ReadText()
+    }
+    finally
+    {
+        stream.Close()
+    }
+
+    if SubStr(responseText, 1, 1) = Chr(0xFEFF)
+        responseText := SubStr(responseText, 2)
+
+    return responseText
+}
+
+
+ParseYoudaoTranslationResponse(response)
+{
+    if !(response is Map)
+        || !response.Has("errorCode")
+        || response["errorCode"] != "0"
+        || !response.Has("translation")
+        || !(response["translation"] is Array)
+    {
+        throw Error("有道翻译接口返回异常。")
+    }
+
+    translatedText := ""
+
+    for item in response["translation"]
+    {
+        if Type(item) != "String" || Trim(item) = ""
+            continue
+
+        if translatedText != ""
+            translatedText .= "`r`n"
+
+        translatedText .= item
+    }
+
+    if translatedText = ""
+        throw Error("有道翻译接口未返回翻译结果。")
+
+    return translatedText
+}
+
+
+ParseGoogleTranslationResponse(response)
+{
+    if !(response is Array)
+        || response.Length = 0
+        || !(response[1] is Array)
+    {
+        throw Error("谷歌翻译接口返回异常。")
+    }
+
+    translatedText := ""
+
+    if response[1].Length > 0 && Type(response[1][1]) = "String"
+        return response[1][1]
+
+    for segment in response[1]
+    {
+        if !(segment is Array)
+            || segment.Length = 0
+            || Type(segment[1]) != "String"
+        {
+            continue
+        }
+
+        translatedText .= segment[1]
+    }
+
+    if Trim(translatedText) = ""
+        throw Error("谷歌翻译接口未返回翻译结果。")
+
+    return translatedText
 }
 
 
