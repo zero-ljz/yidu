@@ -1,20 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
-  <rect x="16" y="16" width="224" height="224" rx="52" fill="#1B2024"/>
-  <rect x="18" y="18" width="220" height="220" rx="50" fill="none" stroke="#353C41" stroke-width="4"/>
+  <g transform="translate(128 128) scale(1.1) translate(-128 -128)">
+    <path
+      d="M24 54c0-10 9-18 19-15l66 16c12 3 19 13 19 25v146c-12-12-25-18-41-22l-46-10c-10-2-17-11-17-21V54z"
+      fill="#27B8A7"
+    />
+    <path
+      d="M232 54c0-10-9-18-19-15l-66 16c-12 3-19 13-19 25v146c12-12 25-18 41-22l46-10c10-2 17-11 17-21V54z"
+      fill="#FF6B5B"
+    />
 
-  <path
-    d="M47 72c0-8 7-14 15-12l49 12c8 2 13 9 13 17v110c-7-7-15-11-25-13l-40-9c-7-2-12-8-12-15V72z"
-    fill="#27B8A7"
-  />
-  <path
-    d="M209 72c0-8-7-14-15-12l-49 12c-8 2-13 9-13 17v110c7-7 15-11 25-13l40-9c7-2 12-8 12-15V72z"
-    fill="#FF6B5B"
-  />
+    <path d="M45 87h39V74l25 25-25 25v-13H45V87z" fill="#F7F8F5"/>
+    <path d="M107 140H68v-13l-25 25 25 25v-13h39v-24z" fill="#F7F8F5"/>
 
-  <path d="M66 96h28V86l18 18-18 18v-10H66V96z" fill="#F7F8F5"/>
-  <path d="M112 132H84v-10l-18 18 18 18v-10h28v-16z" fill="#F7F8F5"/>
-
-  <rect x="150" y="112" width="11" height="38" rx="5.5" fill="#F7F8F5"/>
-  <rect x="169" y="94" width="11" height="74" rx="5.5" fill="#F7F8F5"/>
-  <rect x="188" y="105" width="11" height="52" rx="5.5" fill="#F7F8F5"/>
+    <rect x="149" y="117" width="12" height="46" rx="6" fill="#F7F8F5"/>
+    <rect x="171" y="93" width="12" height="87" rx="6" fill="#F7F8F5"/>
+    <rect x="193" y="107" width="12" height="62" rx="6" fill="#F7F8F5"/>
+  </g>
 </svg>
