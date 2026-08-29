@@ -51,8 +51,11 @@ global TRANSLATION_SERVICES := [
     {Label: "谷歌翻译", Service: "google"}
 ]
 
-global CONFIG_PATH := A_ScriptDir . "\YiDu.ini"
+global IS_PACKAGED := IsPackagedApplication()
+global CONFIG_DIRECTORY := IS_PACKAGED ? A_AppData . "\YiDu" : A_ScriptDir
+global CONFIG_PATH := CONFIG_DIRECTORY . "\YiDu.ini"
 global AUTOSTART_SHORTCUT := A_Startup . "\YiDu.lnk"
+global PACKAGED_STARTUP_HELPER := A_ScriptDir . "\tools\YiDuStartupTask.exe"
 
 global TranslationBusy := false
 global ResultGui := 0
@@ -108,7 +111,9 @@ SetApplicationIcon()
 
 LoadConfig()
 {
-    global CONFIG, CONFIG_PATH, ShowResultAtMouse
+    global CONFIG, CONFIG_PATH, IS_PACKAGED, ShowResultAtMouse
+
+    EnsureConfigDirectory()
 
     if !FileExist(CONFIG_PATH)
         CreateDefaultConfig()
@@ -140,7 +145,9 @@ LoadConfig()
     if GetTranslationServiceIndex(CONFIG.TranslationService) = 0
         CONFIG.TranslationService := "tencent"
 
-    CONFIG.RunAsAdmin := ReadBooleanSetting("RunAsAdmin", CONFIG.RunAsAdmin)
+    CONFIG.RunAsAdmin := IS_PACKAGED
+        ? false
+        : ReadBooleanSetting("RunAsAdmin", CONFIG.RunAsAdmin)
     CONFIG.ShowResultAtMouse := ReadBooleanSetting(
         "ShowResultAtMouse",
         CONFIG.ShowResultAtMouse
@@ -152,6 +159,8 @@ LoadConfig()
 CreateDefaultConfig()
 {
     global CONFIG, CONFIG_PATH
+
+    EnsureConfigDirectory()
 
     IniWrite(CONFIG.Hotkey, CONFIG_PATH, "Settings", "Hotkey")
     IniWrite(CONFIG.SpeakHotkey, CONFIG_PATH, "Settings", "SpeakHotkey")
@@ -169,6 +178,15 @@ CreateDefaultConfig()
         "Settings",
         "ShowResultAtMouse"
     )
+}
+
+
+EnsureConfigDirectory()
+{
+    global CONFIG_DIRECTORY
+
+    if !DirExist(CONFIG_DIRECTORY)
+        DirCreate(CONFIG_DIRECTORY)
 }
 
 
@@ -221,15 +239,17 @@ ReadBooleanSetting(name, defaultValue)
 WriteConfigSetting(name, value)
 {
     global CONFIG_PATH
+
+    EnsureConfigDirectory()
     IniWrite(value, CONFIG_PATH, "Settings", name)
 }
 
 
 EnsureConfiguredElevation()
 {
-    global CONFIG
+    global CONFIG, IS_PACKAGED
 
-    if !CONFIG.RunAsAdmin || A_IsAdmin
+    if IS_PACKAGED || !CONFIG.RunAsAdmin || A_IsAdmin
         return
 
     try
@@ -246,6 +266,19 @@ EnsureConfiguredElevation()
         )
         ExitApp()
     }
+}
+
+
+IsPackagedApplication()
+{
+    packageNameLength := 0
+    result := DllCall(
+        "kernel32\GetCurrentPackageFullName",
+        "UInt*", &packageNameLength,
+        "Ptr", 0,
+        "UInt"
+    )
+    return result = 122
 }
 
 
@@ -378,7 +411,7 @@ RegisterSpeakHotkey()
 
 SetupTrayMenu()
 {
-    global CONFIG, ShowResultAtMouse
+    global CONFIG, IS_PACKAGED, ShowResultAtMouse
     global TRANSLATION_SERVICES, SPEECH_VOICES
     global TranslationServiceTrayMenu, SpeechVoiceTrayMenu
 
@@ -417,12 +450,14 @@ SetupTrayMenu()
 
     A_TrayMenu.Add()
     A_TrayMenu.Add("开机自启", ToggleAutostart)
-    A_TrayMenu.Add("以管理员身份启动", ToggleRunAsAdmin)
+
+    if !IS_PACKAGED
+        A_TrayMenu.Add("以管理员身份启动", ToggleRunAsAdmin)
 
     if IsAutostartEnabled()
         A_TrayMenu.Check("开机自启")
 
-    if CONFIG.RunAsAdmin
+    if !IS_PACKAGED && CONFIG.RunAsAdmin
         A_TrayMenu.Check("以管理员身份启动")
 
     A_TrayMenu.Add()
@@ -782,18 +817,26 @@ FormatHotkeyKey(key)
 
 ToggleAutostart(*)
 {
-    global AUTOSTART_SHORTCUT
+    global AUTOSTART_SHORTCUT, IS_PACKAGED
 
     try
     {
         if IsAutostartEnabled()
         {
-            FileDelete(AUTOSTART_SHORTCUT)
+            if IS_PACKAGED
+                SetPackagedAutostart(false)
+            else
+                FileDelete(AUTOSTART_SHORTCUT)
+
             A_TrayMenu.Uncheck("开机自启")
         }
         else
         {
-            CreateAutostartShortcut()
+            if IS_PACKAGED
+                SetPackagedAutostart(true)
+            else
+                CreateAutostartShortcut()
+
             A_TrayMenu.Check("开机自启")
         }
     }
@@ -806,8 +849,53 @@ ToggleAutostart(*)
 
 IsAutostartEnabled()
 {
-    global AUTOSTART_SHORTCUT
+    global AUTOSTART_SHORTCUT, IS_PACKAGED, PACKAGED_STARTUP_HELPER
+
+    if IS_PACKAGED
+    {
+        if !FileExist(PACKAGED_STARTUP_HELPER)
+            return false
+
+        try return RunWait(
+            QuoteCommandArgument(PACKAGED_STARTUP_HELPER) . " --status",
+            A_ScriptDir,
+            "Hide"
+        ) = 0
+        catch
+            return false
+    }
+
     return FileExist(AUTOSTART_SHORTCUT) != ""
+}
+
+
+SetPackagedAutostart(enable)
+{
+    global PACKAGED_STARTUP_HELPER
+
+    if !A_IsCompiled || !FileExist(PACKAGED_STARTUP_HELPER)
+        throw Error("MSIX 开机启动组件不可用。")
+
+    action := enable ? "--enable" : "--disable"
+    exitCode := RunWait(
+        QuoteCommandArgument(PACKAGED_STARTUP_HELPER) . " " . action,
+        A_ScriptDir,
+        "Hide"
+    )
+
+    if enable && exitCode = 0
+        return
+
+    if !enable && (exitCode = 10 || exitCode = 11 || exitCode = 12)
+        return
+
+    if exitCode = 11
+        throw Error("启动任务已在 Windows 启动应用设置中禁用。")
+
+    if exitCode = 12
+        throw Error("启动任务已被系统策略禁用。")
+
+    throw Error("无法修改 MSIX 开机启动任务，错误代码 " . exitCode . "。")
 }
 
 

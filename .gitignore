@@ -1,3 +1,5 @@
 /YiDu.ini
 *.exe
+/build/
+/release/
 

@@ -42,6 +42,35 @@ cd yidu
 
 需要编译为独立可执行文件时，可以使用 AutoHotkey 自带的 Ahk2Exe，并选择 `YiDu.ico` 作为图标。
 
+## 构建 MSIX
+
+构建 x64 MSIX 需要安装 AutoHotkey v2（含 Ahk2Exe）和 Windows SDK（含 MakeAppx、SignTool 与 Windows Runtime 元数据）。运行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\msix\build-msix.ps1
+```
+
+脚本会从 `YiDu.ahk` 的 Ahk2Exe 指令读取版本，编译主程序和开机启动任务组件，并在 `release` 目录生成经过开发证书签名的 `.msix` 与对应 `.cer`。首次旁加载可运行：
+
+```powershell
+.\packaging\msix\install-development-msix.ps1 `
+  -PackagePath .\release\YiDu-1.1.0-MSIX-x64.msix
+```
+
+安装脚本会请求管理员权限，将开发证书导入本机信任区并安装包。正式提交 Microsoft Store 时，应使用 Partner Center 分配的包标识和发布者，不使用开发证书：
+
+```powershell
+.\packaging\msix\build-msix.ps1 `
+  -Mode Store `
+  -IdentityName "Partner Center 分配的 Package Identity Name" `
+  -Publisher "Partner Center 分配的 Publisher" `
+  -PublisherDisplayName "发布者显示名称"
+```
+
+MSIX 清单声明 `runFullTrust`，用于全局快捷键、选区读取、剪贴板、托盘程序和本地配置。MSIX 版本不提供管理员模式，并通过 Windows StartupTask 管理开机自启。
+
+提交前可参考 [Microsoft Store 审核说明](packaging/msix/STORE-CERTIFICATION-NOTES.md) 核对受限能力、启动任务和隐私披露。
+
 ## 使用方法
 
 | 操作 | 默认快捷键 | 说明 |
@@ -57,12 +86,12 @@ cd yidu
 - 语音角色
 - 在鼠标指针处显示结果
 - 开机自启
-- 以管理员身份启动
+- 以管理员身份启动（MSIX 版本不提供）
 - 关于译读，包括作者、开源仓库、官方网站和反馈邮箱
 
 ## 配置
 
-首次运行时，脚本会在自身所在目录生成 `YiDu.ini`：
+首次运行时，源码版和绿色版会在自身所在目录生成 `YiDu.ini`；MSIX 版本则保存在 `%APPDATA%\YiDu\YiDu.ini`：
 
 ```ini
 [Settings]
