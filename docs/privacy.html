@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="译读隐私政策，说明译读 Windows 应用和官方网站如何处理文本、配置、临时文件及第三方服务数据。">
+  <meta name="theme-color" content="#1b2024">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="隐私政策 - 译读">
+  <meta property="og:description" content="了解译读在翻译、在线朗读和网站访问过程中如何处理数据。">
+  <meta property="og:url" content="https://yidu.iapp.run/privacy.html">
+  <meta property="og:image" content="https://yidu.iapp.run/assets/yidu-icon.png">
+  <link rel="canonical" href="https://yidu.iapp.run/privacy.html">
+  <link rel="icon" type="image/png" href="assets/yidu-icon.png">
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+  <script defer src="site.js"></script>
+  <title>隐私政策 - 译读</title>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="index.html" aria-label="译读首页">
+        <img src="assets/yidu-icon.png" width="36" height="36" alt="">
+        <span>译读</span>
+      </a>
+
+      <button class="nav-toggle" type="button" aria-label="打开导航" aria-expanded="false" aria-controls="site-nav" title="导航菜单">
+        <i data-lucide="menu" aria-hidden="true"></i>
+      </button>
+
+      <nav id="site-nav" class="site-nav" aria-label="主要导航">
+        <a href="index.html#features">功能</a>
+        <a href="index.html#shortcuts">快捷键</a>
+        <a href="index.html#download">下载</a>
+        <a href="privacy.html" aria-current="page">隐私政策</a>
+        <a class="nav-github" href="https://github.com/zero-ljz/yidu" target="_blank" rel="noreferrer">
+          <i data-lucide="github" aria-hidden="true"></i>
+          <span>GitHub</span>
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="legal-hero">
+      <div class="container">
+        <a class="legal-back" href="index.html">
+          <i data-lucide="arrow-left" aria-hidden="true"></i>
+          返回译读首页
+        </a>
+        <p class="legal-eyebrow">隐私与数据处理</p>
+        <h1>隐私政策</h1>
+        <p class="legal-summary">本政策说明译读 Windows 应用及官方网站会处理哪些数据、为何处理，以及你可以如何控制这些数据。</p>
+        <p class="legal-meta">
+          <span>生效日期：2026 年 8 月 29 日</span>
+          <span>最近更新：2026 年 8 月 29 日</span>
+        </p>
+      </div>
+    </section>
+
+    <section class="legal-page-content">
+      <div class="container legal-layout">
+        <nav class="legal-toc" aria-label="隐私政策目录">
+          <strong>本页目录</strong>
+          <a href="#scope">适用范围</a>
+          <a href="#processing">数据处理</a>
+          <a href="#third-parties">第三方服务</a>
+          <a href="#local-data">本地数据</a>
+          <a href="#website">官方网站</a>
+          <a href="#choices">你的选择</a>
+          <a href="#security">安全与变更</a>
+          <a href="#contact">联系我们</a>
+        </nav>
+
+        <article class="legal-document">
+          <p class="legal-intro">译读是一款免费、开源的 Windows 工具。应用不要求注册账户，也不包含广告、用户行为分析或由开发者运营的数据收集服务器。只有当你主动使用翻译或在线朗读功能时，相应文本才会发送给你选择或功能所需的第三方服务。</p>
+
+          <section id="scope" class="legal-section">
+            <h2>1. 适用范围</h2>
+            <p>本政策适用于译读 Windows 应用以及 <a href="https://yidu.iapp.run/">yidu.iapp.run</a> 官方网站。通过本站访问 GitHub、翻译服务或其他第三方网站后，对方的数据处理由其自身隐私政策约束。</p>
+          </section>
+
+          <section id="processing" class="legal-section">
+            <h2>2. 我们处理的数据</h2>
+            <p>译读仅为完成你发起的操作处理必要数据。主要数据流如下：</p>
+
+            <div class="table-scroll">
+              <table class="privacy-table">
+                <thead>
+                  <tr>
+                    <th scope="col">功能</th>
+                    <th scope="col">处理的数据</th>
+                    <th scope="col">接收方</th>
+                    <th scope="col">目的</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>划词或手动输入</td>
+                    <td>你选中或输入的文本</td>
+                    <td>仅在本机处理，直至你执行翻译或朗读</td>
+                    <td>获取待处理内容</td>
+                  </tr>
+                  <tr>
+                    <td>在线翻译</td>
+                    <td>待翻译文本、源语言和目标语言</td>
+                    <td>腾讯、有道或 Google 中你当前选择的服务</td>
+                    <td>返回翻译结果</td>
+                  </tr>
+                  <tr>
+                    <td>在线朗读</td>
+                    <td>待朗读文本和所选音色标识</td>
+                    <td>Microsoft 在线语音服务</td>
+                    <td>合成并返回音频</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <p>第三方服务还可能自动接收提供网络服务所必需的信息，例如 IP 地址、请求时间、User-Agent 和连接信息。译读开发者不通过应用接收这些请求内容。</p>
+          </section>
+
+          <section id="third-parties" class="legal-section">
+            <h2>3. 第三方在线服务</h2>
+            <p>译读使用无需用户 API Key 的第三方在线接口。接口的可用性、处理方式和保留期限由相应服务提供方决定，可能随其政策调整。</p>
+            <ul>
+              <li><strong>腾讯翻译：</strong>翻译文本会发送至腾讯相关翻译接口。参见<a href="https://privacy.qq.com/policy/tencent-privacypolicy" target="_blank" rel="noreferrer">腾讯隐私保护平台</a>。</li>
+              <li><strong>有道翻译：</strong>翻译文本会发送至有道翻译接口。参见<a href="https://shared.ydstatic.com/dict/market/youdaoInc-v2.0/index.html" target="_blank" rel="noreferrer">网易有道隐私政策</a>。</li>
+              <li><strong>Google 翻译：</strong>翻译文本会发送至 Google 翻译接口。参见<a href="https://policies.google.com/privacy?hl=zh-CN" target="_blank" rel="noreferrer">Google 隐私权政策</a>。</li>
+              <li><strong>Microsoft 在线语音：</strong>待朗读文本及音色标识会发送至 Microsoft Edge 在线语音服务。参见<a href="https://privacy.microsoft.com/zh-cn/privacystatement" target="_blank" rel="noreferrer">Microsoft 隐私声明</a>。</li>
+            </ul>
+            <p>请勿使用译读处理不适合提供给上述第三方的密码、身份信息、商业秘密、医疗信息或其他敏感内容。</p>
+          </section>
+
+          <section id="local-data" class="legal-section">
+            <h2>4. 本地存储与临时文件</h2>
+            <h3>应用配置</h3>
+            <p>译读在程序目录的 <code>YiDu.ini</code> 中保存快捷键、翻译服务、语音角色、管理员启动和结果显示位置等设置。配置文件不包含翻译历史或账户信息，也不会由译读发送给开发者。</p>
+
+            <h3>剪贴板</h3>
+            <p>为读取当前选中的文本，译读会在本机临时访问剪贴板，并尽力恢复原有内容。只有当你主动选择“复制结果”时，翻译结果才会写入剪贴板。</p>
+
+            <h3>语音临时文件</h3>
+            <p>在线朗读期间，译读会在 Windows 临时目录创建请求、状态和音频文件，并在正常停止、完成或退出时删除。若应用或系统异常终止，个别临时文件可能暂时保留，可通过 Windows 临时文件清理功能移除。</p>
+
+            <h3>开机自启</h3>
+            <p>仅当你主动开启“开机自启”时，译读才会在 Windows 启动目录创建快捷方式；关闭该选项会删除对应快捷方式。</p>
+          </section>
+
+          <section id="website" class="legal-section">
+            <h2>5. 官方网站</h2>
+            <p>官方网站是静态页面，不设置第一方 Cookie，不使用本地存储，也未接入广告、访问分析或跟踪脚本。页面从 unpkg CDN 加载图标脚本；浏览器访问该资源时，CDN 可能收到 IP 地址、User-Agent 和请求时间等标准网络信息。</p>
+            <p>当你点击下载、源码或问题反馈链接时，将访问 GitHub；点击邮件链接时，将由你的本地邮件应用处理。相关服务的数据处理受其各自政策约束。</p>
+          </section>
+
+          <section id="choices" class="legal-section">
+            <h2>6. 你的选择与控制</h2>
+            <ul>
+              <li>你可以在托盘菜单中选择腾讯、有道或 Google 作为翻译服务。</li>
+              <li>你可以不使用翻译或在线朗读功能，以避免将文本发送给相应第三方。</li>
+              <li>你可以退出应用并删除 <code>YiDu.ini</code>，清除本地保存的应用设置。</li>
+              <li>你可以使用 Windows 的临时文件清理功能移除异常退出后可能残留的语音文件。</li>
+              <li>译读源码公开在 GitHub，你可以审查、修改或自行构建应用。</li>
+            </ul>
+          </section>
+
+          <section id="security" class="legal-section">
+            <h2>7. 安全与政策变更</h2>
+            <p>译读通过 HTTPS 或加密的 WebSocket 连接第三方在线服务，但任何互联网传输都无法保证绝对安全。请根据文本敏感程度谨慎使用在线功能。</p>
+            <p>当应用功能、第三方服务或数据处理方式发生实质变化时，本页面将同步更新，并修改页面顶部的“最近更新”日期。建议在升级应用后查看最新版本。</p>
+          </section>
+
+          <section id="contact" class="legal-section">
+            <h2>8. 联系我们</h2>
+            <div class="policy-contact">
+              <p>如对本政策或译读的数据处理方式有疑问，请发送邮件至 <a href="mailto:hi@iapp.run">hi@iapp.run</a>，或通过 <a href="https://github.com/zero-ljz/yidu/issues" target="_blank" rel="noreferrer">GitHub Issues</a> 提交问题。</p>
+            </div>
+          </section>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <img src="assets/yidu-icon.png" width="30" height="30" alt="">
+        <span>译读</span>
+      </div>
+      <p>© <span id="current-year">2026</span> zero-ljz（空心） · MIT License</p>
+      <div>
+        <a href="privacy.html" aria-current="page">隐私政策</a>
+        <a href="https://github.com/zero-ljz/yidu" target="_blank" rel="noreferrer">GitHub</a>
+        <a href="mailto:hi@iapp.run">反馈邮箱</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
