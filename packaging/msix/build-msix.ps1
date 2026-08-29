@@ -16,6 +16,11 @@ $sourcePath = Join-Path $root 'YiDu.ahk'
 $iconPath = Join-Path $root 'YiDu.ico'
 $buildRoot = Join-Path $root 'build\msix'
 $layoutPath = Join-Path $buildRoot 'layout'
+$developmentIdentityName = 'YiDu.Desktop'
+$developmentPublisher = 'CN=zero-ljz'
+$storeIdentityName = 'zero-ljz.65035B1959F4'
+$storePublisher = 'CN=2393B316-80C9-466F-AA0D-A54F1924BC33'
+$storePublisherDisplayName = 'zero-ljz'
 
 function Find-FirstExistingPath([string]$ExplicitPath, [string[]]$Candidates, [string]$Description) {
     if ($ExplicitPath) {
@@ -63,8 +68,16 @@ foreach ($part in ($Version -split '\.')) {
     }
 }
 
-if ($Mode -eq 'Store' -and ($IdentityName -eq 'YiDu.Desktop' -or $Publisher -eq 'CN=zero-ljz')) {
-    throw 'Store mode requires -IdentityName and -Publisher values assigned by Microsoft Partner Center.'
+if ($Mode -eq 'Store') {
+    if ($IdentityName -eq $developmentIdentityName) {
+        $IdentityName = $storeIdentityName
+    }
+    if ($Publisher -eq $developmentPublisher) {
+        $Publisher = $storePublisher
+    }
+    if (-not $PublisherDisplayName) {
+        $PublisherDisplayName = $storePublisherDisplayName
+    }
 }
 
 $displayVersion = (($Version -split '\.')[0..2] -join '.')

@@ -57,15 +57,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\msix\build-msix.
   -PackagePath .\release\YiDu-1.1.0-MSIX-x64.msix
 ```
 
-安装脚本会请求管理员权限，将开发证书导入本机信任区并安装包。正式提交 Microsoft Store 时，应使用 Partner Center 分配的包标识和发布者，不使用开发证书：
+安装脚本会请求管理员权限，将开发证书导入本机信任区并安装包。正式提交 Microsoft Store 时，脚本会自动使用 Partner Center 分配给译读的包标识和发布者，并生成不带开发签名的商店包：
 
 ```powershell
-.\packaging\msix\build-msix.ps1 `
-  -Mode Store `
-  -IdentityName "Partner Center 分配的 Package Identity Name" `
-  -Publisher "Partner Center 分配的 Publisher" `
-  -PublisherDisplayName "发布者显示名称"
+.\packaging\msix\build-msix.ps1 -Mode Store
 ```
+
+商店包清单使用 `zero-ljz.65035B1959F4`、`CN=2393B316-80C9-466F-AA0D-A54F1924BC33` 和发布者显示名称 `zero-ljz`。产品的 Microsoft Store ID 为 `9MTM3STZL8L1`。
 
 MSIX 清单声明 `runFullTrust`，用于全局快捷键、选区读取、剪贴板、托盘程序和本地配置。MSIX 版本不提供管理员模式，并通过 Windows StartupTask 管理开机自启。
 
@@ -101,6 +99,8 @@ SpeechVoice=zh-CN-XiaoyiNeural
 TranslationService=tencent
 RunAsAdmin=0
 ShowResultAtMouse=1
+PrivacyChoiceMade=0
+OnlineServicesConsent=0
 ```
 
 | 配置项 | 说明 |
@@ -111,12 +111,16 @@ ShowResultAtMouse=1
 | `TranslationService` | 翻译服务，可选 `tencent`、`youdao` 或 `google` |
 | `RunAsAdmin` | 是否以管理员身份启动，`1` 为开启 |
 | `ShowResultAtMouse` | 是否在鼠标指针附近显示结果，`1` 为开启 |
+| `PrivacyChoiceMade` | 是否已完成首次在线服务选择，`1` 表示已选择 |
+| `OnlineServicesConsent` | 是否允许向所选第三方发送待翻译或朗读文本，`1` 为允许 |
 
 快捷键使用 AutoHotkey 语法，例如 `^` 表示 `Ctrl`、`+` 表示 `Shift`、`!` 表示 `Alt`、`#` 表示 `Win`。
 
 ## 网络与隐私
 
 译读可使用腾讯、有道或谷歌的免费翻译接口处理翻译请求，并使用 Microsoft Edge 在线语音服务合成朗读音频。翻译或朗读时，对应文本会发送到所选第三方在线服务，请勿处理不适合上传的敏感内容。
+
+首次运行时，译读会在发送任何文本前征求在线服务授权。你可以从托盘菜单的“在线服务与隐私”随时撤回或重新给予同意。
 
 这些在线接口可能随服务方调整而发生变化，稳定性和可用性不由本项目保证。
 

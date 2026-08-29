@@ -17,6 +17,8 @@ global CONFIG := {
     TranslationService: "tencent",
     RunAsAdmin: false,
     ShowResultAtMouse: true,
+    PrivacyChoiceMade: false,
+    OnlineServicesConsent: false,
     RequestTimeoutMs: 10000,
     RequestPollIntervalMs: 50,
     SelectionTimeoutSeconds: 0.5,
@@ -68,6 +70,7 @@ global ResultPinned := false
 global ShowResultAtMouse := true
 global ResultManualPosition := 0
 global AboutGui := 0
+global PrivacyGui := 0
 global ActiveInputDialog := 0
 global ActiveTranslationRequest := 0
 global TranslationServiceTrayMenu := 0
@@ -96,8 +99,13 @@ OnMessage(0x0201, HandleWindowBackgroundDrag)
 OnMessage(0x0006, HandleWindowActivation)
 OnExit(CleanupSpeech)
 SetupTrayMenu()
-SetTimer(EnsureSpeechWorker, -1)
-ShowStartupNotification()
+if CONFIG.OnlineServicesConsent
+    SetTimer(EnsureSpeechWorker, -1)
+
+if CONFIG.PrivacyChoiceMade
+    ShowStartupNotification()
+else
+    SetTimer(OpenOnlineServicesPrivacyDialog.Bind(true), -1)
 
 
 SetApplicationIcon()
@@ -152,6 +160,14 @@ LoadConfig()
         "ShowResultAtMouse",
         CONFIG.ShowResultAtMouse
     )
+    CONFIG.PrivacyChoiceMade := ReadBooleanSetting(
+        "PrivacyChoiceMade",
+        CONFIG.PrivacyChoiceMade
+    )
+    CONFIG.OnlineServicesConsent := ReadBooleanSetting(
+        "OnlineServicesConsent",
+        CONFIG.OnlineServicesConsent
+    )
     ShowResultAtMouse := CONFIG.ShowResultAtMouse
 }
 
@@ -177,6 +193,18 @@ CreateDefaultConfig()
         CONFIG_PATH,
         "Settings",
         "ShowResultAtMouse"
+    )
+    IniWrite(
+        CONFIG.PrivacyChoiceMade ? 1 : 0,
+        CONFIG_PATH,
+        "Settings",
+        "PrivacyChoiceMade"
+    )
+    IniWrite(
+        CONFIG.OnlineServicesConsent ? 1 : 0,
+        CONFIG_PATH,
+        "Settings",
+        "OnlineServicesConsent"
     )
 }
 
@@ -461,6 +489,7 @@ SetupTrayMenu()
         A_TrayMenu.Check("以管理员身份启动")
 
     A_TrayMenu.Add()
+    A_TrayMenu.Add("在线服务与隐私", ShowOnlineServicesPrivacyDialog)
     A_TrayMenu.Add("关于译读", ShowAboutDialog)
     A_TrayMenu.Add()
     A_TrayMenu.Add("退出", (*) => ExitApp())
@@ -519,6 +548,12 @@ ShowAboutDialog(*)
         "x+8 yp w300",
         "<a href=`"https://yidu.iapp.run`">yidu.iapp.run</a>"
     )
+    aboutWindow.AddText("xm y+12 w76", "隐私政策")
+    privacyLink := aboutWindow.AddLink(
+        "x+8 yp w300",
+        "<a href=`"https://yidu.iapp.run/privacy.html`">"
+            . "查看隐私政策</a>"
+    )
     aboutWindow.AddText("xm y+12 w76", "反馈邮箱")
     emailLink := aboutWindow.AddLink(
         "x+8 yp w300",
@@ -533,12 +568,13 @@ ShowAboutDialog(*)
         aboutWindow,
         repositoryLink,
         websiteLink,
+        privacyLink,
         emailLink,
         closeButton
     )
 
     AboutGui := aboutWindow
-    aboutWindow.Show("w430 h276")
+    aboutWindow.Show("w430 h308")
     RedrawGuiWindow(aboutWindow)
 }
 
@@ -552,13 +588,198 @@ CloseAboutDialog(aboutWindow, *)
 }
 
 
+ShowOnlineServicesPrivacyDialog(*)
+{
+    OpenOnlineServicesPrivacyDialog(false)
+}
+
+
+OpenOnlineServicesPrivacyDialog(firstRun := false)
+{
+    global CONFIG, PrivacyGui
+
+    if IsObject(PrivacyGui)
+    {
+        try
+        {
+            WinActivate("ahk_id " . PrivacyGui.Hwnd)
+            return
+        }
+
+        PrivacyGui := 0
+    }
+
+    windowTitle := firstRun ? "开始使用译读" : "在线服务与隐私"
+    privacyWindow := Gui("-MinimizeBox -MaximizeBox", windowTitle)
+    privacyWindow.MarginX := 20
+    privacyWindow.MarginY := 18
+    privacyWindow.BackColor := "171A1F"
+
+    privacyWindow.SetFont("s16 w600 cF1F3F5", "Microsoft YaHei UI")
+    privacyWindow.AddText(
+        "xm ym",
+        firstRun ? "开始使用译读" : "在线服务与隐私"
+    )
+    privacyWindow.SetFont("s10 cF1F3F5", "Microsoft YaHei UI")
+    privacyWindow.AddText(
+        "xm y+16 w500",
+        "选择文字后按 " . FormatHotkey(CONFIG.Hotkey) . " 翻译，按 "
+            . FormatHotkey(CONFIG.SpeakHotkey)
+            . " 朗读；没有选中文字时会打开输入窗口。"
+    )
+    privacyWindow.AddText(
+        "xm y+12 w500",
+        "译读只会在你主动按下翻译或朗读快捷键后处理选中的文本。"
+    )
+    privacyWindow.AddText(
+        "xm y+12 w500",
+        "在线翻译会将待翻译文本发送给你选择的腾讯、有道或 Google；"
+            . "在线朗读会将待朗读文本和音色发送给 Microsoft 在线语音服务。"
+    )
+    privacyWindow.AddText(
+        "xm y+12 w500",
+        "文本可能包含个人或敏感信息。译读不保存翻译历史，"
+            . "你可以随时从托盘菜单撤回同意。"
+    )
+    privacyWindow.SetFont("s9 cA7ADB7", "Microsoft YaHei UI")
+    privacyLink := privacyWindow.AddLink(
+        "xm y+12 w500",
+        "<a href=`"https://yidu.iapp.run/privacy.html`">查看完整隐私政策</a>"
+    )
+    statusText := CONFIG.OnlineServicesConsent
+        ? "当前状态：在线翻译和在线朗读已启用"
+        : "当前状态：在线翻译和在线朗读未启用"
+    privacyWindow.AddText("xm y+16 w500", statusText)
+
+    privacyWindow.SetFont("s10 cF1F3F5", "Microsoft YaHei UI")
+    if CONFIG.OnlineServicesConsent
+    {
+        primaryButton := privacyWindow.AddButton(
+            "xm y+20 w100 h30",
+            "撤回同意"
+        )
+        primaryButton.OnEvent(
+            "Click",
+            SetOnlineServicesConsent.Bind(false, privacyWindow)
+        )
+        closeButton := privacyWindow.AddButton("x+10 yp w78 h30 Default", "关闭")
+        closeButton.OnEvent(
+            "Click",
+            CloseOnlineServicesPrivacyDialog.Bind(privacyWindow)
+        )
+        privacyWindow.OnEvent(
+            "Close",
+            CloseOnlineServicesPrivacyDialog.Bind(privacyWindow)
+        )
+        privacyWindow.OnEvent(
+            "Escape",
+            CloseOnlineServicesPrivacyDialog.Bind(privacyWindow)
+        )
+    }
+    else
+    {
+        primaryButton := privacyWindow.AddButton(
+            "xm y+20 w120 h30 Default",
+            "同意并启用"
+        )
+        primaryButton.OnEvent(
+            "Click",
+            SetOnlineServicesConsent.Bind(true, privacyWindow)
+        )
+        closeButton := privacyWindow.AddButton("x+10 yp w100 h30", "暂不使用")
+        closeButton.OnEvent(
+            "Click",
+            SetOnlineServicesConsent.Bind(false, privacyWindow)
+        )
+        privacyWindow.OnEvent(
+            "Close",
+            SetOnlineServicesConsent.Bind(false, privacyWindow)
+        )
+        privacyWindow.OnEvent(
+            "Escape",
+            SetOnlineServicesConsent.Bind(false, privacyWindow)
+        )
+    }
+
+    ApplyDarkTheme(privacyWindow, privacyLink, primaryButton, closeButton)
+    PrivacyGui := privacyWindow
+    privacyWindow.Show("w540 h382")
+    RedrawGuiWindow(privacyWindow)
+}
+
+
+SetOnlineServicesConsent(enabled, privacyWindow, *)
+{
+    global CONFIG
+
+    CONFIG.PrivacyChoiceMade := true
+    CONFIG.OnlineServicesConsent := enabled
+    WriteConfigSetting("PrivacyChoiceMade", 1)
+    WriteConfigSetting("OnlineServicesConsent", enabled ? 1 : 0)
+
+    if enabled
+        SetTimer(EnsureSpeechWorker, -1)
+    else
+        CancelActiveOnlineOperations()
+
+    CloseOnlineServicesPrivacyDialog(privacyWindow)
+    TrayTip(
+        enabled
+            ? "在线翻译和在线朗读已启用。"
+            : "在线翻译和在线朗读已关闭。",
+        "译读",
+        1
+    )
+}
+
+
+CloseOnlineServicesPrivacyDialog(privacyWindow, *)
+{
+    global PrivacyGui
+
+    PrivacyGui := 0
+    try privacyWindow.Destroy()
+}
+
+
+EnsureOnlineServicesConsent()
+{
+    global CONFIG
+
+    if CONFIG.OnlineServicesConsent
+        return true
+
+    OpenOnlineServicesPrivacyDialog(false)
+    TrayTip("请先决定是否启用在线服务。", "译读", 1)
+    return false
+}
+
+
+CancelActiveOnlineOperations()
+{
+    global ActiveTranslationRequest, TranslationBusy
+
+    SetTimer(CheckTranslationRequest, 0)
+
+    if IsObject(ActiveTranslationRequest)
+        try ActiveTranslationRequest.Http.Abort()
+
+    ActiveTranslationRequest := 0
+    TranslationBusy := false
+    StopSpeech()
+    StopSpeechWorker()
+}
+
+
 ShowStartupNotification()
 {
     global CONFIG
 
     TrayTip(
-        "已启动：" . FormatHotkey(CONFIG.Hotkey) . " 翻译，"
-            . FormatHotkey(CONFIG.SpeakHotkey) . " 朗读。",
+        CONFIG.OnlineServicesConsent
+            ? "已启动：" . FormatHotkey(CONFIG.Hotkey) . " 翻译，"
+                . FormatHotkey(CONFIG.SpeakHotkey) . " 朗读。"
+            : "已启动，在线功能当前未启用。可从托盘菜单启用。",
         "译读",
         1
     )
@@ -1045,6 +1266,9 @@ TranslateFromHotkey(*)
     if TranslationBusy
         return
 
+    if !EnsureOnlineServicesConsent()
+        return
+
     TranslationBusy := true
 
     try
@@ -1082,6 +1306,9 @@ SpeakFromHotkey(*)
         try WinActivate("ahk_id " . ActiveInputDialog.Gui.Hwnd)
         return
     }
+
+    if !EnsureOnlineServicesConsent()
+        return
 
     try
     {
@@ -2365,6 +2592,9 @@ StartEdgeSpeech(text, voice)
     global SpeechBusy, SpeechStartedAt
     global SpeechTimeoutMs, SpeechSynthesisPending
     global SpeechWorkerRequestPath
+
+    if !EnsureOnlineServicesConsent()
+        return
 
     StopSpeech()
 
