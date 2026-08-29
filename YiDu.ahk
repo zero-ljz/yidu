@@ -1,5 +1,5 @@
 #Requires AutoHotkey v2.0
-#SingleInstance Force
+#SingleInstance Off
 ;@Ahk2Exe-SetName 译读
 ;@Ahk2Exe-SetCompanyName zero-ljz（空心）
 ;@Ahk2Exe-SetDescription 译读
@@ -85,6 +85,7 @@ global SpeechWorkerReadyPath := ""
 LoadConfig()
 SetApplicationIcon()
 EnsureConfiguredElevation()
+ReplacePreviousInstance()
 RegisterTranslationHotkey()
 RegisterSpeakHotkey()
 OnMessage(0x0100, HandleInputKeyDown)
@@ -245,6 +246,83 @@ EnsureConfiguredElevation()
         )
         ExitApp()
     }
+}
+
+
+ReplacePreviousInstance()
+{
+    currentProcessId := DllCall("GetCurrentProcessId", "UInt")
+    previousDetectHiddenWindows := A_DetectHiddenWindows
+    previousProcessIds := []
+
+    DetectHiddenWindows(true)
+
+    try
+    {
+        for hwnd in WinGetList("ahk_class AutoHotkey")
+        {
+            try processId := WinGetPID("ahk_id " . hwnd)
+            catch
+                continue
+
+            if processId = currentProcessId
+                continue
+
+            if !IsSameApplicationInstance(hwnd, processId)
+                continue
+
+            if !HasValue(previousProcessIds, processId)
+                previousProcessIds.Push(processId)
+        }
+
+        for processId in previousProcessIds
+        {
+            try WinClose("ahk_pid " . processId . " ahk_class AutoHotkey")
+
+            try
+            {
+                if ProcessWaitClose(processId, 3)
+                    continue
+            }
+
+            try ProcessClose(processId)
+            try ProcessWaitClose(processId, 2)
+        }
+    }
+    finally
+        DetectHiddenWindows(previousDetectHiddenWindows)
+}
+
+
+IsSameApplicationInstance(hwnd, processId)
+{
+    if A_IsCompiled
+    {
+        try processPath := ProcessGetPath(processId)
+        catch
+            return false
+
+        return StrLower(processPath) = StrLower(A_ScriptFullPath)
+    }
+
+    try windowTitle := WinGetTitle("ahk_id " . hwnd)
+    catch
+        return false
+
+    expectedTitlePrefix := A_ScriptFullPath . " - AutoHotkey"
+    return InStr(windowTitle, expectedTitlePrefix, false) = 1
+}
+
+
+HasValue(values, expectedValue)
+{
+    for value in values
+    {
+        if value = expectedValue
+            return true
+    }
+
+    return false
 }
 
 
