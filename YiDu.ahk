@@ -17,6 +17,8 @@ global CONFIG := {
     TranslationService: "tencent",
     RunAsAdmin: false,
     ShowResultAtMouse: true,
+    ColorTheme: "system",
+    WindowTransparency: true,
     PrivacyChoiceMade: false,
     OnlineServicesConsent: false,
     RequestTimeoutMs: 10000,
@@ -75,6 +77,7 @@ global ActiveInputDialog := 0
 global ActiveTranslationRequest := 0
 global TranslationServiceTrayMenu := 0
 global SpeechVoiceTrayMenu := 0
+global ColorThemeTrayMenu := 0
 global SpeechAudioPath := ""
 global SpeechErrorPath := ""
 global SpeechDonePath := ""
@@ -97,6 +100,7 @@ RegisterSpeakHotkey()
 OnMessage(0x0100, HandleInputKeyDown)
 OnMessage(0x0201, HandleWindowBackgroundDrag)
 OnMessage(0x0006, HandleWindowActivation)
+OnMessage(0x001A, HandleSystemSettingChange)
 OnExit(CleanupSpeech)
 SetupTrayMenu()
 if CONFIG.OnlineServicesConsent
@@ -160,6 +164,24 @@ LoadConfig()
         "ShowResultAtMouse",
         CONFIG.ShowResultAtMouse
     )
+    CONFIG.ColorTheme := StrLower(Trim(IniRead(
+        CONFIG_PATH,
+        "Settings",
+        "ColorTheme",
+        CONFIG.ColorTheme
+    )))
+
+    if CONFIG.ColorTheme != "system"
+        && CONFIG.ColorTheme != "dark"
+        && CONFIG.ColorTheme != "light"
+    {
+        CONFIG.ColorTheme := "system"
+    }
+
+    CONFIG.WindowTransparency := ReadBooleanSetting(
+        "WindowTransparency",
+        CONFIG.WindowTransparency
+    )
     CONFIG.PrivacyChoiceMade := ReadBooleanSetting(
         "PrivacyChoiceMade",
         CONFIG.PrivacyChoiceMade
@@ -193,6 +215,13 @@ CreateDefaultConfig()
         CONFIG_PATH,
         "Settings",
         "ShowResultAtMouse"
+    )
+    IniWrite(CONFIG.ColorTheme, CONFIG_PATH, "Settings", "ColorTheme")
+    IniWrite(
+        CONFIG.WindowTransparency ? 1 : 0,
+        CONFIG_PATH,
+        "Settings",
+        "WindowTransparency"
     )
     IniWrite(
         CONFIG.PrivacyChoiceMade ? 1 : 0,
@@ -441,7 +470,7 @@ SetupTrayMenu()
 {
     global CONFIG, IS_PACKAGED, ShowResultAtMouse
     global TRANSLATION_SERVICES, SPEECH_VOICES
-    global TranslationServiceTrayMenu, SpeechVoiceTrayMenu
+    global TranslationServiceTrayMenu, SpeechVoiceTrayMenu, ColorThemeTrayMenu
 
     A_TrayMenu.Delete()
     translateHotkeyText := FormatHotkey(CONFIG.Hotkey)
@@ -476,6 +505,17 @@ SetupTrayMenu()
     if ShowResultAtMouse
         A_TrayMenu.Check("在鼠标指针处显示结果")
 
+    ColorThemeTrayMenu := Menu()
+    ColorThemeTrayMenu.Add("跟随系统", SetColorTheme.Bind("system"))
+    ColorThemeTrayMenu.Add("深色", SetColorTheme.Bind("dark"))
+    ColorThemeTrayMenu.Add("浅色", SetColorTheme.Bind("light"))
+    UpdateColorThemeTrayChecks()
+    A_TrayMenu.Add("外观", ColorThemeTrayMenu)
+    A_TrayMenu.Add("窗口半透明", ToggleWindowTransparency)
+
+    if CONFIG.WindowTransparency
+        A_TrayMenu.Check("窗口半透明")
+
     A_TrayMenu.Add()
     A_TrayMenu.Add("开机自启", ToggleAutostart)
 
@@ -504,6 +544,63 @@ SetupTrayMenu()
 }
 
 
+SetColorTheme(theme, *)
+{
+    global CONFIG
+
+    theme := StrLower(theme)
+
+    if theme != "system" && theme != "dark" && theme != "light"
+        return
+
+    CONFIG.ColorTheme := theme
+    WriteConfigSetting("ColorTheme", theme)
+    UpdateColorThemeTrayChecks()
+    ApplyAppearanceToOpenWindows()
+}
+
+
+UpdateColorThemeTrayChecks()
+{
+    global CONFIG, ColorThemeTrayMenu
+
+    if !IsObject(ColorThemeTrayMenu)
+        return
+
+    ColorThemeTrayMenu.Uncheck("跟随系统")
+    ColorThemeTrayMenu.Uncheck("深色")
+    ColorThemeTrayMenu.Uncheck("浅色")
+
+    selectedLabel := "跟随系统"
+
+    if CONFIG.ColorTheme = "dark"
+        selectedLabel := "深色"
+    else if CONFIG.ColorTheme = "light"
+        selectedLabel := "浅色"
+
+    ColorThemeTrayMenu.Check(selectedLabel)
+}
+
+
+ToggleWindowTransparency(*)
+{
+    global CONFIG
+
+    CONFIG.WindowTransparency := !CONFIG.WindowTransparency
+    WriteConfigSetting(
+        "WindowTransparency",
+        CONFIG.WindowTransparency ? 1 : 0
+    )
+
+    if CONFIG.WindowTransparency
+        A_TrayMenu.Check("窗口半透明")
+    else
+        A_TrayMenu.Uncheck("窗口半透明")
+
+    ApplyAppearanceToOpenWindows()
+}
+
+
 ShowAboutDialog(*)
 {
     global APP_VERSION, AboutGui
@@ -519,20 +616,21 @@ ShowAboutDialog(*)
         AboutGui := 0
     }
 
+    palette := GetAppearancePalette()
     aboutWindow := Gui("-MinimizeBox -MaximizeBox", "关于译读")
     aboutWindow.MarginX := 18
     aboutWindow.MarginY := 16
-    aboutWindow.BackColor := "171A1F"
+    aboutWindow.BackColor := palette.WindowBackground
 
-    aboutWindow.SetFont("s16 w600 cF1F3F5", "Microsoft YaHei UI")
+    aboutWindow.SetFont("s16 w600 c" . palette.Text, "Microsoft YaHei UI")
     aboutWindow.AddText("xm ym", "译读")
-    aboutWindow.SetFont("s9 cA7ADB7", "Microsoft YaHei UI")
+    aboutWindow.SetFont("s9 c" . palette.MutedText, "Microsoft YaHei UI")
     aboutWindow.AddText(
         "xm y+4 w394",
         "Windows 划词翻译与在线朗读工具"
     )
 
-    aboutWindow.SetFont("s10 cF1F3F5", "Microsoft YaHei UI")
+    aboutWindow.SetFont("s10 c" . palette.Text, "Microsoft YaHei UI")
     aboutWindow.AddText("xm y+18 w76", "软件版本")
     aboutWindow.AddText("x+8 yp w300", APP_VERSION)
     aboutWindow.AddText("xm y+12 w76", "软件作者")
@@ -564,7 +662,7 @@ ShowAboutDialog(*)
     closeButton.OnEvent("Click", CloseAboutDialog.Bind(aboutWindow))
     aboutWindow.OnEvent("Close", CloseAboutDialog)
     aboutWindow.OnEvent("Escape", CloseAboutDialog)
-    ApplyDarkTheme(
+    ApplyWindowTheme(
         aboutWindow,
         repositoryLink,
         websiteLink,
@@ -575,6 +673,7 @@ ShowAboutDialog(*)
 
     AboutGui := aboutWindow
     aboutWindow.Show("w430 h308")
+    ApplyWindowTransparency(aboutWindow)
     RedrawGuiWindow(aboutWindow)
 }
 
@@ -609,18 +708,19 @@ OpenOnlineServicesPrivacyDialog(firstRun := false)
         PrivacyGui := 0
     }
 
+    palette := GetAppearancePalette()
     windowTitle := firstRun ? "开始使用译读" : "在线服务与隐私"
     privacyWindow := Gui("-MinimizeBox -MaximizeBox", windowTitle)
     privacyWindow.MarginX := 20
     privacyWindow.MarginY := 18
-    privacyWindow.BackColor := "171A1F"
+    privacyWindow.BackColor := palette.WindowBackground
 
-    privacyWindow.SetFont("s16 w600 cF1F3F5", "Microsoft YaHei UI")
+    privacyWindow.SetFont("s16 w600 c" . palette.Text, "Microsoft YaHei UI")
     privacyWindow.AddText(
         "xm ym",
         firstRun ? "开始使用译读" : "在线服务与隐私"
     )
-    privacyWindow.SetFont("s10 cF1F3F5", "Microsoft YaHei UI")
+    privacyWindow.SetFont("s10 c" . palette.Text, "Microsoft YaHei UI")
     privacyWindow.AddText(
         "xm y+16 w500",
         "选择文字后按 " . FormatHotkey(CONFIG.Hotkey) . " 翻译，按 "
@@ -641,7 +741,7 @@ OpenOnlineServicesPrivacyDialog(firstRun := false)
         "文本可能包含个人或敏感信息。译读不保存翻译历史，"
             . "你可以随时从托盘菜单撤回同意。"
     )
-    privacyWindow.SetFont("s9 cA7ADB7", "Microsoft YaHei UI")
+    privacyWindow.SetFont("s9 c" . palette.MutedText, "Microsoft YaHei UI")
     privacyLink := privacyWindow.AddLink(
         "xm y+12 w500",
         "<a href=`"https://yidu.iapp.run/privacy.html`">查看完整隐私政策</a>"
@@ -651,7 +751,7 @@ OpenOnlineServicesPrivacyDialog(firstRun := false)
         : "当前状态：在线翻译和在线朗读未启用"
     privacyWindow.AddText("xm y+16 w500", statusText)
 
-    privacyWindow.SetFont("s10 cF1F3F5", "Microsoft YaHei UI")
+    privacyWindow.SetFont("s10 c" . palette.Text, "Microsoft YaHei UI")
     if CONFIG.OnlineServicesConsent
     {
         primaryButton := privacyWindow.AddButton(
@@ -701,9 +801,10 @@ OpenOnlineServicesPrivacyDialog(firstRun := false)
         )
     }
 
-    ApplyDarkTheme(privacyWindow, privacyLink, primaryButton, closeButton)
+    ApplyWindowTheme(privacyWindow, privacyLink, primaryButton, closeButton)
     PrivacyGui := privacyWindow
     privacyWindow.Show("w540 h382")
+    ApplyWindowTransparency(privacyWindow)
     RedrawGuiWindow(privacyWindow)
 }
 
@@ -1361,6 +1462,7 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
         Pinned: false
     }
 
+    palette := GetAppearancePalette()
     inputGui := Gui(
         "+Resize -MinimizeBox -MaximizeBox +MinSize"
             . (selectorType != "" ? "460" : "360") . "x200",
@@ -1368,11 +1470,12 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
     )
     inputGui.MarginX := 10
     inputGui.MarginY := 10
-    inputGui.BackColor := "171A1F"
-    inputGui.SetFont("s10 cF1F3F5", "Microsoft YaHei UI")
+    inputGui.BackColor := palette.WindowBackground
+    inputGui.SetFont("s10 c" . palette.Text, "Microsoft YaHei UI")
 
     inputEdit := inputGui.AddEdit(
-        "xm ym w440 h204 +Multi +WantReturn Background20242B cF1F3F5"
+        "xm ym w440 h204 +Multi +WantReturn Background"
+            . palette.FieldBackground . " c" . palette.Text
     )
     pinButton := inputGui.AddButton("xm y+10 w72 h26", "钉住")
     selectorList := 0
@@ -1446,9 +1549,9 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
     if IsObject(selectorList)
         themedControls.Push(selectorList)
 
-    ApplyDarkTheme(inputGui, themedControls*)
+    ApplyWindowTheme(inputGui, themedControls*)
     inputGui.Show("w460 h260")
-    WinSetTransparent(238, "ahk_id " . inputGui.Hwnd)
+    ApplyWindowTransparency(inputGui)
     inputEdit.Focus()
     RedrawGuiWindow(inputGui)
 
@@ -1655,6 +1758,15 @@ HandleWindowActivation(wParam, lParam, message, hwnd)
 }
 
 
+HandleSystemSettingChange(*)
+{
+    global CONFIG
+
+    if CONFIG.ColorTheme = "system"
+        SetTimer(ApplyAppearanceToOpenWindows, -1)
+}
+
+
 CloseInactiveInputWindow(hwnd)
 {
     global ActiveInputDialog
@@ -1707,7 +1819,7 @@ CenterControlVertically(referenceControl, targetControl)
 {
     referenceControl.GetPos(, &referenceY, , &referenceHeight)
     targetControl.GetPos(, , , &targetHeight)
-    targetY := referenceY + Floor((referenceHeight - targetHeight) / 2)
+    targetY := referenceY + Round((referenceHeight - targetHeight) / 2)
     targetControl.Move(, targetY)
 }
 
@@ -2304,7 +2416,7 @@ ShowTranslationResult(translatedText, pending := false)
 
     if isNewWindow
     {
-        ApplyDarkTheme(
+        ApplyWindowTheme(
             ResultGui,
             ResultEdit,
             ResultPinButton,
@@ -2313,7 +2425,7 @@ ShowTranslationResult(translatedText, pending := false)
             ResultCloseButton
         )
         ResultGui.Show("w360 h200")
-        WinSetTransparent(225, "ahk_id " . ResultGui.Hwnd)
+        ApplyWindowTransparency(ResultGui)
     }
     else
     {
@@ -2481,14 +2593,19 @@ CreateResultWindow()
     global ResultGui, ResultEdit, ResultPinButton, ResultSpeakButton
     global ResultCopyButton, ResultCloseButton
 
-    ResultGui := Gui("+Resize +MinSize320x128", "翻译结果")
+    palette := GetAppearancePalette()
+    ResultGui := Gui(
+        "+Resize +MinSize320x128",
+        "翻译结果"
+    )
     ResultGui.MarginX := 10
     ResultGui.MarginY := 10
-    ResultGui.BackColor := "171A1F"
-    ResultGui.SetFont("s10 cF1F3F5", "Microsoft YaHei UI")
+    ResultGui.BackColor := palette.WindowBackground
+    ResultGui.SetFont("s10 c" . palette.Text, "Microsoft YaHei UI")
 
     ResultEdit := ResultGui.AddEdit(
-        "xm ym w360 h144 +Multi +WantReturn Background20242B cF1F3F5"
+        "xm ym w360 h144 +Multi +WantReturn Background"
+            . palette.FieldBackground . " c" . palette.Text
     )
     ResultPinButton := ResultGui.AddButton("xm y+10 w72 h26", "钉住")
     ResultSpeakButton := ResultGui.AddButton("x146 yp w64 h26", "朗读")
@@ -3421,10 +3538,56 @@ Base64EncodeBuffer(dataPointer, byteCount)
 }
 
 
-ApplyDarkTheme(guiObject, controls*)
+GetAppearancePalette()
 {
+    if GetEffectiveColorTheme() = "light"
+    {
+        return {
+            WindowBackground: "F5F7FA",
+            FieldBackground: "FFFFFF",
+            Text: "202124",
+            MutedText: "5F6B73",
+            ControlTheme: "Explorer",
+            DarkTitleBar: false
+        }
+    }
+
+    return {
+        WindowBackground: "171A1F",
+        FieldBackground: "20242B",
+        Text: "F1F3F5",
+        MutedText: "A7ADB7",
+        ControlTheme: "DarkMode_Explorer",
+        DarkTitleBar: true
+    }
+}
+
+
+GetEffectiveColorTheme()
+{
+    global CONFIG
+
+    if CONFIG.ColorTheme != "system"
+        return CONFIG.ColorTheme
+
+    try
+    {
+        appsUseLightTheme := RegRead(
+            "HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+            "AppsUseLightTheme"
+        )
+        return appsUseLightTheme = 0 ? "dark" : "light"
+    }
+
+    return "light"
+}
+
+
+ApplyWindowTheme(guiObject, controls*)
+{
+    palette := GetAppearancePalette()
     enabled := Buffer(4, 0)
-    NumPut("Int", 1, enabled)
+    NumPut("Int", palette.DarkTitleBar ? 1 : 0, enabled)
 
     try
     {
@@ -3455,10 +3618,74 @@ ApplyDarkTheme(guiObject, controls*)
         try DllCall(
             "uxtheme\SetWindowTheme",
             "Ptr", control.Hwnd,
-            "Str", "DarkMode_Explorer",
+            "Str", palette.ControlTheme,
             "Ptr", 0
         )
     }
+}
+
+
+ApplyWindowTransparency(guiObject)
+{
+    global CONFIG
+
+    try WinSetTransparent(
+        CONFIG.WindowTransparency ? 235 : "Off",
+        "ahk_id " . guiObject.Hwnd
+    )
+}
+
+
+ApplyAppearanceToOpenWindows()
+{
+    global ResultGui, AboutGui, PrivacyGui, ActiveInputDialog
+
+    if IsObject(ResultGui)
+        ApplyAppearanceToExistingWindow(ResultGui)
+
+    if IsObject(AboutGui)
+        ApplyAppearanceToExistingWindow(AboutGui)
+
+    if IsObject(PrivacyGui)
+        ApplyAppearanceToExistingWindow(PrivacyGui)
+
+    if IsObject(ActiveInputDialog) && IsObject(ActiveInputDialog.Gui)
+        ApplyAppearanceToExistingWindow(ActiveInputDialog.Gui)
+}
+
+
+ApplyAppearanceToExistingWindow(guiObject)
+{
+    palette := GetAppearancePalette()
+    controls := []
+
+    try
+    {
+        for control in guiObject
+            controls.Push(control)
+    }
+
+    guiObject.BackColor := palette.WindowBackground
+
+    for control in controls
+    {
+        try control.SetFont("c" . palette.Text)
+
+        try
+        {
+            if control.Type = "Edit"
+            {
+                control.Opt(
+                    "Background" . palette.FieldBackground
+                        . " c" . palette.Text
+                )
+            }
+        }
+    }
+
+    ApplyWindowTheme(guiObject, controls*)
+    ApplyWindowTransparency(guiObject)
+    RedrawGuiWindow(guiObject)
 }
 
 

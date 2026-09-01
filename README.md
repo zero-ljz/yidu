@@ -22,6 +22,7 @@
 - 支持结果复制、窗口置顶和翻译结果朗读
 - 支持中文普通话、方言、粤语、台湾腔及英语音色
 - 支持开机自启、管理员模式和托盘菜单设置
+- 支持跟随系统、深色、浅色界面以及可选的窗口半透明效果
 
 ## 运行要求
 
@@ -87,6 +88,8 @@ MSIX 清单声明 `runFullTrust`，用于全局快捷键、选区读取、剪贴
 - 翻译服务
 - 语音角色
 - 在鼠标指针处显示结果
+- 外观（跟随系统、深色或浅色）
+- 窗口半透明
 - 开机自启
 - 以管理员身份启动（MSIX 版本不提供）
 - 关于译读，包括作者、开源仓库、官方网站和反馈邮箱
@@ -103,6 +106,8 @@ SpeechVoice=zh-CN-XiaoyiNeural
 TranslationService=tencent
 RunAsAdmin=0
 ShowResultAtMouse=1
+ColorTheme=system
+WindowTransparency=1
 PrivacyChoiceMade=0
 OnlineServicesConsent=0
 ```
@@ -115,6 +120,8 @@ OnlineServicesConsent=0
 | `TranslationService` | 翻译服务，可选 `tencent`、`youdao` 或 `google` |
 | `RunAsAdmin` | 是否以管理员身份启动，`1` 为开启 |
 | `ShowResultAtMouse` | 是否在鼠标指针附近显示结果，`1` 为开启 |
+| `ColorTheme` | 窗口主题，可选 `system`、`dark` 或 `light`，默认跟随系统 |
+| `WindowTransparency` | 是否启用窗口半透明效果，`1` 为开启，默认开启 |
 | `PrivacyChoiceMade` | 是否已完成首次在线服务选择，`1` 表示已选择 |
 | `OnlineServicesConsent` | 是否允许向所选第三方发送待翻译或朗读文本，`1` 为允许 |
 
