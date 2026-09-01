@@ -4,12 +4,12 @@
 ;@Ahk2Exe-SetCompanyName zero-ljz（空心）
 ;@Ahk2Exe-SetDescription 译读
 ;@Ahk2Exe-SetCopyright Copyright (c) 2026 zero-ljz
-;@Ahk2Exe-SetVersion 1.1.0.0
+;@Ahk2Exe-SetVersion 1.2.0.0
 
 SendMode "Input"
 CoordMode "Mouse", "Screen"
 
-global APP_VERSION := "1.1.0"
+global APP_VERSION := "1.2.0"
 global CONFIG := {
     Hotkey: "^F1",
     SpeakHotkey: "^F2",

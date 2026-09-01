@@ -59,7 +59,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\msix\build-msix.
 
 ```powershell
 .\packaging\msix\install-development-msix.ps1 `
-  -PackagePath .\release\YiDu-1.1.0-MSIX-x64.msix
+  -PackagePath .\release\YiDu-1.2.0-MSIX-x64.msix
 ```
 
 安装脚本会请求管理员权限，将开发证书导入本机信任区并安装包。正式提交 Microsoft Store 时，脚本会自动使用 Partner Center 分配给译读的包标识和发布者，并生成不带开发签名的商店包：
