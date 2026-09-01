@@ -530,6 +530,7 @@ SetupTrayMenu()
         A_TrayMenu.Check("以管理员身份启动")
 
     A_TrayMenu.Add()
+    A_TrayMenu.Add("打开数据目录", OpenDataDirectory)
     A_TrayMenu.Add("在线服务与隐私", ShowOnlineServicesPrivacyDialog)
     A_TrayMenu.Add("关于译读", ShowAboutDialog)
     A_TrayMenu.Add()
@@ -542,6 +543,22 @@ SetupTrayMenu()
         1,
         127
     )
+}
+
+
+OpenDataDirectory(*)
+{
+    global CONFIG_DIRECTORY
+
+    try
+    {
+        EnsureConfigDirectory()
+        Run("explorer.exe " . QuoteCommandArgument(CONFIG_DIRECTORY))
+    }
+    catch Error as err
+    {
+        MsgBox("打开数据目录失败：`n" . err.Message, "译读", "Icon!")
+    }
 }
 
 
