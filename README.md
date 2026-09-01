@@ -6,6 +6,9 @@
 
 译读是一款使用 AutoHotkey v2 编写的 Windows 划词翻译与在线朗读工具。选中文字后按下快捷键，即可进行中英互译或朗读；未选中文字时，会自动打开输入窗口。
 
+> [!IMPORTANT]
+> **EXE 版本未进行数字签名，可能被 Windows Defender 或其他杀毒软件误报。推荐通过 [Microsoft Store](https://apps.microsoft.com/detail/9MTM3STZL8L1) 下载和安装。**
+
 <p align="center">
   <a href="https://apps.microsoft.com/detail/9MTM3STZL8L1">
     <img src="https://get.microsoft.com/images/zh-cn%20dark.svg" alt="在 Microsoft Store 中获取">
