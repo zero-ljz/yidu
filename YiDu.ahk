@@ -98,6 +98,7 @@ ReplacePreviousInstance()
 RegisterTranslationHotkey()
 RegisterSpeakHotkey()
 OnMessage(0x0100, HandleInputKeyDown)
+OnMessage(0x002B, DrawDropDownItem)
 OnMessage(0x0201, HandleWindowBackgroundDrag)
 OnMessage(0x0006, HandleWindowActivation)
 OnMessage(0x001A, HandleSystemSettingChange)
@@ -1479,6 +1480,7 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
     )
     pinButton := inputGui.AddButton("xm y+10 w72 h26", "钉住")
     selectorList := 0
+    ; CBS_OWNERDRAWFIXED | CBS_HASSTRINGS keeps owner-drawn labels as Unicode.
 
     if selectorType = "voice"
     {
@@ -1487,7 +1489,10 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
         for item in SPEECH_VOICES
             voiceLabels.Push(item.Label)
 
-        selectorList := inputGui.AddDropDownList("x90 yp w220", voiceLabels)
+        selectorList := inputGui.AddDropDownList(
+            "x90 yp w220 +0x210",
+            voiceLabels
+        )
         selectorList.Choose(GetSpeechVoiceIndex(CONFIG.SpeechVoice))
         selectorList.OnEvent("Change", ChangeSpeechVoice)
     }
@@ -1498,7 +1503,10 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
         for item in TRANSLATION_SERVICES
             serviceLabels.Push(item.Label)
 
-        selectorList := inputGui.AddDropDownList("x90 yp w220", serviceLabels)
+        selectorList := inputGui.AddDropDownList(
+            "x90 yp w220 +0x210",
+            serviceLabels
+        )
         selectorList.Choose(GetTranslationServiceIndex(CONFIG.TranslationService))
         selectorList.OnEvent("Change", ChangeTranslationService)
     }
@@ -1508,9 +1516,6 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
         submitLabel
     )
     cancelButton := inputGui.AddButton("x+8 yp w52 h26", "取消")
-
-    if IsObject(selectorList)
-        CenterControlVertically(pinButton, selectorList)
 
     ActiveInputDialog := {
         Gui: inputGui,
@@ -1550,6 +1555,14 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
         themedControls.Push(selectorList)
 
     ApplyWindowTheme(inputGui, themedControls*)
+
+    if IsObject(selectorList)
+    {
+        ApplyDropDownTheme(selectorList)
+        MatchDropDownHeight(pinButton, selectorList)
+        CenterControlVertically(pinButton, selectorList)
+    }
+
     inputGui.Show("w460 h260")
     ApplyWindowTransparency(inputGui)
     inputEdit.Focus()
@@ -1821,6 +1834,197 @@ CenterControlVertically(referenceControl, targetControl)
     targetControl.GetPos(, , , &targetHeight)
     targetY := referenceY + Round((referenceHeight - targetHeight) / 2)
     targetControl.Move(, targetY)
+}
+
+
+MatchDropDownHeight(referenceControl, dropDownControl)
+{
+    static CB_SETITEMHEIGHT := 0x0153
+    static CB_GETITEMHEIGHT := 0x0154
+    static CB_GETCOUNT := 0x0146
+    static CB_SETMINVISIBLE := 0x1701
+
+    GetPhysicalWindowRect(referenceControl.Hwnd, , , , &referenceHeight)
+    GetPhysicalWindowRect(dropDownControl.Hwnd, , , , &dropDownHeight)
+    selectionHeight := SendMessage(
+        CB_GETITEMHEIGHT,
+        -1,
+        ,
+        ,
+        "ahk_id " . dropDownControl.Hwnd
+    )
+    borderHeight := Max(0, dropDownHeight - selectionHeight)
+    targetSelectionHeight := Max(1, referenceHeight - borderHeight)
+
+    SendMessage(
+        CB_SETITEMHEIGHT,
+        -1,
+        targetSelectionHeight,
+        ,
+        "ahk_id " . dropDownControl.Hwnd
+    )
+
+    ; Item 0 sets every list row for a CBS_OWNERDRAWFIXED combo box.
+    SendMessage(
+        CB_SETITEMHEIGHT,
+        0,
+        targetSelectionHeight,
+        ,
+        "ahk_id " . dropDownControl.Hwnd
+    )
+
+    itemCount := SendMessage(
+        CB_GETCOUNT,
+        ,
+        ,
+        ,
+        "ahk_id " . dropDownControl.Hwnd
+    )
+
+    if itemCount > 0
+    {
+        SendMessage(
+            CB_SETMINVISIBLE,
+            Min(3, itemCount),
+            ,
+            ,
+            "ahk_id " . dropDownControl.Hwnd
+        )
+    }
+}
+
+
+DrawDropDownItem(wParam, lParam, message, hwnd)
+{
+    static ODT_COMBOBOX := 3
+    static ODS_SELECTED := 0x0001
+    static CB_GETCURSEL := 0x0147
+    static WM_GETFONT := 0x0031
+    static DT_VCENTER_SINGLELINE_END_ELLIPSIS_NOPREFIX := 0x8824
+
+    if NumGet(lParam, 0, "UInt") != ODT_COMBOBOX
+        return
+
+    itemId := NumGet(lParam, 8, "UInt")
+    itemState := NumGet(lParam, 16, "UInt")
+    hwndOffset := A_PtrSize = 8 ? 24 : 20
+    rectOffset := hwndOffset + (2 * A_PtrSize)
+    controlHwnd := NumGet(lParam, hwndOffset, "Ptr")
+    deviceContext := NumGet(lParam, hwndOffset + A_PtrSize, "Ptr")
+
+    if itemId = 0xFFFFFFFF
+    {
+        itemId := SendMessage(
+            CB_GETCURSEL,
+            ,
+            ,
+            ,
+            "ahk_id " . controlHwnd
+        )
+    }
+
+    itemText := GetDropDownItemText(controlHwnd, itemId)
+    palette := GetAppearancePalette()
+    backgroundColor := itemState & ODS_SELECTED
+        ? palette.SelectionBackground
+        : palette.FieldBackground
+    rect := Buffer(16, 0)
+
+    Loop 4
+        NumPut(
+            "Int",
+            NumGet(lParam, rectOffset + ((A_Index - 1) * 4), "Int"),
+            rect,
+            (A_Index - 1) * 4
+        )
+
+    brush := DllCall(
+        "gdi32\CreateSolidBrush",
+        "UInt", RgbToColorRef(backgroundColor),
+        "Ptr"
+    )
+    DllCall("user32\FillRect", "Ptr", deviceContext, "Ptr", rect.Ptr, "Ptr", brush)
+    DllCall("gdi32\DeleteObject", "Ptr", brush)
+
+    dpi := 96
+    try dpi := DllCall("user32\GetDpiForWindow", "Ptr", controlHwnd, "UInt")
+    textPadding := DllCall("MulDiv", "Int", 8, "Int", dpi, "Int", 96, "Int")
+    NumPut("Int", NumGet(rect, 0, "Int") + textPadding, rect, 0)
+
+    oldBackgroundMode := DllCall(
+        "gdi32\SetBkMode",
+        "Ptr", deviceContext,
+        "Int", 1,
+        "Int"
+    )
+    oldTextColor := DllCall(
+        "gdi32\SetTextColor",
+        "Ptr", deviceContext,
+        "UInt", RgbToColorRef(palette.Text),
+        "UInt"
+    )
+    font := SendMessage(WM_GETFONT, , , , "ahk_id " . controlHwnd)
+    oldFont := font
+        ? DllCall("gdi32\SelectObject", "Ptr", deviceContext, "Ptr", font, "Ptr")
+        : 0
+
+    DllCall(
+        "user32\DrawTextW",
+        "Ptr", deviceContext,
+        "Str", itemText,
+        "Int", -1,
+        "Ptr", rect.Ptr,
+        "UInt", DT_VCENTER_SINGLELINE_END_ELLIPSIS_NOPREFIX,
+        "Int"
+    )
+
+    if oldFont
+        DllCall("gdi32\SelectObject", "Ptr", deviceContext, "Ptr", oldFont)
+
+    DllCall("gdi32\SetTextColor", "Ptr", deviceContext, "UInt", oldTextColor)
+    DllCall("gdi32\SetBkMode", "Ptr", deviceContext, "Int", oldBackgroundMode)
+    return true
+}
+
+
+GetDropDownItemText(controlHwnd, itemId)
+{
+    static CB_ERR := -1
+    static CB_GETLBTEXT := 0x0148
+    static CB_GETLBTEXTLEN := 0x0149
+
+    if itemId = CB_ERR || itemId = 0xFFFFFFFF
+        return ""
+
+    textLength := SendMessage(
+        CB_GETLBTEXTLEN,
+        itemId,
+        ,
+        ,
+        "ahk_id " . controlHwnd
+    )
+
+    if textLength < 0
+        return ""
+
+    textBuffer := Buffer((textLength + 1) * 2, 0)
+    SendMessage(
+        CB_GETLBTEXT,
+        itemId,
+        textBuffer.Ptr,
+        ,
+        "ahk_id " . controlHwnd
+    )
+    return StrGet(textBuffer, "UTF-16")
+}
+
+
+RgbToColorRef(rgbHex)
+{
+    rgb := ("0x" . rgbHex) + 0
+    return ((rgb & 0x0000FF) << 16)
+        | (rgb & 0x00FF00)
+        | ((rgb & 0xFF0000) >> 16)
 }
 
 
@@ -3545,6 +3749,7 @@ GetAppearancePalette()
         return {
             WindowBackground: "F5F7FA",
             FieldBackground: "FFFFFF",
+            SelectionBackground: "DCEAF7",
             Text: "202124",
             MutedText: "5F6B73",
             ControlTheme: "Explorer",
@@ -3555,6 +3760,7 @@ GetAppearancePalette()
     return {
         WindowBackground: "171A1F",
         FieldBackground: "20242B",
+        SelectionBackground: "365B79",
         Text: "F1F3F5",
         MutedText: "A7ADB7",
         ControlTheme: "DarkMode_Explorer",
@@ -3586,8 +3792,12 @@ GetEffectiveColorTheme()
 ApplyWindowTheme(guiObject, controls*)
 {
     palette := GetAppearancePalette()
+    darkModeEnabled := palette.DarkTitleBar
     enabled := Buffer(4, 0)
-    NumPut("Int", palette.DarkTitleBar ? 1 : 0, enabled)
+    NumPut("Int", darkModeEnabled ? 1 : 0, enabled)
+
+    SetPreferredAppColorMode(darkModeEnabled)
+    AllowDarkModeForWindow(guiObject.Hwnd, darkModeEnabled)
 
     try
     {
@@ -3615,6 +3825,8 @@ ApplyWindowTheme(guiObject, controls*)
 
     for control in controls
     {
+        AllowDarkModeForWindow(control.Hwnd, darkModeEnabled)
+
         try DllCall(
             "uxtheme\SetWindowTheme",
             "Ptr", control.Hwnd,
@@ -3650,7 +3862,97 @@ ApplyAppearanceToOpenWindows()
         ApplyAppearanceToExistingWindow(PrivacyGui)
 
     if IsObject(ActiveInputDialog) && IsObject(ActiveInputDialog.Gui)
+    {
         ApplyAppearanceToExistingWindow(ActiveInputDialog.Gui)
+
+        if IsObject(ActiveInputDialog.SelectorList)
+        {
+            ApplyDropDownTheme(ActiveInputDialog.SelectorList)
+            MatchDropDownHeight(
+                ActiveInputDialog.PinButton,
+                ActiveInputDialog.SelectorList
+            )
+            CenterControlVertically(
+                ActiveInputDialog.PinButton,
+                ActiveInputDialog.SelectorList
+            )
+            RedrawGuiWindow(ActiveInputDialog.Gui)
+        }
+    }
+}
+
+
+SetPreferredAppColorMode(darkModeEnabled)
+{
+    try DllCall(
+        "uxtheme\#135",
+        "Int", darkModeEnabled ? 1 : 0,
+        "Int"
+    )
+}
+
+
+AllowDarkModeForWindow(hwnd, enabled)
+{
+    try return DllCall(
+        "uxtheme\#133",
+        "Ptr", hwnd,
+        "Int", enabled ? 1 : 0,
+        "Int"
+    )
+
+    return false
+}
+
+
+ApplyDropDownTheme(dropDownControl)
+{
+    palette := GetAppearancePalette()
+    darkModeEnabled := palette.DarkTitleBar
+    comboBoxInfo := Buffer(A_PtrSize = 8 ? 64 : 52, 0)
+    NumPut("UInt", comboBoxInfo.Size, comboBoxInfo, 0)
+
+    AllowDarkModeForWindow(dropDownControl.Hwnd, darkModeEnabled)
+
+    try DllCall(
+        "uxtheme\SetWindowTheme",
+        "Ptr", dropDownControl.Hwnd,
+        "Str", palette.ControlTheme,
+        "Ptr", 0
+    )
+
+    if !DllCall(
+        "user32\GetComboBoxInfo",
+        "Ptr", dropDownControl.Hwnd,
+        "Ptr", comboBoxInfo.Ptr,
+        "Int"
+    )
+    {
+        return
+    }
+
+    childOffset := A_PtrSize = 8 ? 48 : 44
+
+    Loop 2
+    {
+        childHwnd := NumGet(
+            comboBoxInfo,
+            childOffset + ((A_Index - 1) * A_PtrSize),
+            "Ptr"
+        )
+
+        if !childHwnd
+            continue
+
+        AllowDarkModeForWindow(childHwnd, darkModeEnabled)
+
+        try DllCall(
+            "uxtheme\SetWindowTheme",
+            "Ptr", childHwnd,
+            "Str", palette.ControlTheme,
+            "Ptr", 0
+        )
+    }
 }
 
 
