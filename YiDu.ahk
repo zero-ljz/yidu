@@ -50,9 +50,9 @@ global SPEECH_VOICES := [
 ]
 
 global TRANSLATION_SERVICES := [
-    {Label: "腾讯翻译", Service: "tencent"},
-    {Label: "有道翻译", Service: "youdao"},
-    {Label: "谷歌翻译", Service: "google"}
+    {Label: "腾讯", Service: "tencent"},
+    {Label: "有道", Service: "youdao"},
+    {Label: "谷歌", Service: "google"}
 ]
 
 global IS_PACKAGED := IsPackagedApplication()
@@ -1488,9 +1488,12 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
     }
 
     palette := GetAppearancePalette()
+    minimumWidth := selectorType = "translation"
+        ? 300
+        : (selectorType != "" ? 460 : 360)
     inputGui := Gui(
         "+Resize -MinimizeBox -MaximizeBox +MinSize"
-            . (selectorType != "" ? "460" : "360") . "x200",
+            . minimumWidth . "x200",
         windowTitle
     )
     inputGui.MarginX := 10
@@ -1529,7 +1532,7 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
             serviceLabels.Push(item.Label)
 
         selectorList := inputGui.AddDropDownList(
-            "x90 yp w220 +0x210",
+            "x250 yp w60 +0x210",
             serviceLabels
         )
         selectorList.Choose(GetTranslationServiceIndex(CONFIG.TranslationService))
@@ -1844,7 +1847,8 @@ ResizeInputWindow(
 
     if IsObject(selectorList)
     {
-        selectorList.Move(width - 370)
+        selectorList.GetPos(, , &selectorWidth)
+        selectorList.Move(width - 150 - selectorWidth)
         CenterControlVertically(pinButton, selectorList)
     }
 
