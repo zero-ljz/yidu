@@ -255,9 +255,11 @@ a {
   transform: translateY(-2px);
 }
 
-.button svg {
+.button svg,
+.button img {
   width: 19px;
   height: 19px;
+  flex: 0 0 auto;
 }
 
 .button-primary {
@@ -1105,20 +1107,21 @@ kbd {
   }
 
   .hero-actions {
-    flex-direction: row;
+    flex-direction: column;
     gap: 8px;
     margin-top: 16px;
   }
 
   .hero-actions .button {
-    flex: 1;
-    width: auto;
+    flex: none;
+    width: 100%;
     min-width: 0;
     padding-inline: 8px;
     font-size: 13px;
   }
 
-  .hero-actions .button svg {
+  .hero-actions .button svg,
+  .hero-actions .button img {
     width: 17px;
     height: 17px;
   }

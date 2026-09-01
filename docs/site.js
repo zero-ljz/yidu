@@ -26,4 +26,42 @@ document.addEventListener("DOMContentLoaded", () => {
   if (year) {
     year.textContent = String(new Date().getFullYear());
   }
+
+  document.querySelectorAll(".microsoft-store-link").forEach((link) => {
+    link.addEventListener("click", (event) => {
+      event.preventDefault();
+
+      const fallbackUrl = link.dataset.webFallback;
+      if (!fallbackUrl) {
+        window.location.href = link.href;
+        return;
+      }
+
+      let fallbackTimer;
+      const cancelFallback = () => {
+        window.clearTimeout(fallbackTimer);
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+        window.removeEventListener("blur", cancelFallback);
+      };
+      const handleVisibilityChange = () => {
+        if (document.hidden) {
+          cancelFallback();
+        }
+      };
+
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+      window.addEventListener("blur", cancelFallback);
+      fallbackTimer = window.setTimeout(() => {
+        cancelFallback();
+        window.location.assign(fallbackUrl);
+      }, 1800);
+
+      try {
+        window.location.href = link.href;
+      } catch {
+        cancelFallback();
+        window.location.assign(fallbackUrl);
+      }
+    });
+  });
 });

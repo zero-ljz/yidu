@@ -7,8 +7,8 @@
 译读是一款使用 AutoHotkey v2 编写的 Windows 划词翻译与在线朗读工具。选中文字后按下快捷键，即可进行中英互译或朗读；未选中文字时，会自动打开输入窗口。
 
 <p align="center">
-  <a href="https://github.com/zero-ljz/yidu/releases/latest/download/YiDu.exe">
-    <img src="https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD%E6%9C%80%E6%96%B0%E7%89%88-YiDu.exe-0078D4?style=for-the-badge&amp;logo=windows11&amp;logoColor=white" alt="下载最新版 YiDu.exe">
+  <a href="https://apps.microsoft.com/detail/9MTM3STZL8L1">
+    <img src="https://get.microsoft.com/images/zh-cn%20dark.svg" alt="在 Microsoft Store 中获取">
   </a>
 </p>
 
@@ -31,7 +31,11 @@
 
 本项目不需要申请 API Key。
 
-## 快速开始
+## 安装
+
+前往 [Microsoft Store](https://apps.microsoft.com/detail/9MTM3STZL8L1) 获取译读。Microsoft Store 会负责安装并自动提供后续更新。
+
+## 从源码运行
 
 ```powershell
 git clone https://github.com/zero-ljz/yidu.git
