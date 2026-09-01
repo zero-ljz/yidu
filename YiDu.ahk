@@ -478,8 +478,8 @@ SetupTrayMenu()
     speakHotkeyText := FormatHotkey(CONFIG.SpeakHotkey)
     translateMenuText := "翻译`t" . translateHotkeyText
     speakMenuText := "朗读`t" . speakHotkeyText
-    A_TrayMenu.Add(translateMenuText, TranslateFromHotkey)
-    A_TrayMenu.Add(speakMenuText, SpeakFromHotkey)
+    A_TrayMenu.Add(translateMenuText, TranslateFromTray)
+    A_TrayMenu.Add(speakMenuText, SpeakFromTray)
 
     TranslationServiceTrayMenu := Menu()
 
@@ -1357,6 +1357,18 @@ ToggleResultAtMouse(*)
 
 TranslateFromHotkey(*)
 {
+    TranslateText(true)
+}
+
+
+TranslateFromTray(*)
+{
+    TranslateText(false)
+}
+
+
+TranslateText(readSelection)
+{
     global ActiveInputDialog, TranslationBusy
 
     if IsObject(ActiveInputDialog)
@@ -1375,7 +1387,7 @@ TranslateFromHotkey(*)
 
     try
     {
-        sourceText := GetSelectedText()
+        sourceText := readSelection ? GetSelectedText() : ""
 
         if sourceText = ""
         {
@@ -1401,6 +1413,18 @@ TranslateFromHotkey(*)
 
 SpeakFromHotkey(*)
 {
+    SpeakText(true)
+}
+
+
+SpeakFromTray(*)
+{
+    SpeakText(false)
+}
+
+
+SpeakText(readSelection)
+{
     global CONFIG, ActiveInputDialog
 
     if IsObject(ActiveInputDialog)
@@ -1414,7 +1438,7 @@ SpeakFromHotkey(*)
 
     try
     {
-        sourceText := GetSelectedText()
+        sourceText := readSelection ? GetSelectedText() : ""
 
         if sourceText = ""
             sourceText := PromptForText("输入朗读内容", "朗读", "voice")
@@ -1478,6 +1502,7 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
         "xm ym w440 h204 +Multi +WantReturn Background"
             . palette.FieldBackground . " c" . palette.Text
     )
+    inputEdit.Value := A_Clipboard
     pinButton := inputGui.AddButton("xm y+10 w72 h26", "钉住")
     selectorList := 0
     ; CBS_OWNERDRAWFIXED | CBS_HASSTRINGS keeps owner-drawn labels as Unicode.
@@ -1566,6 +1591,7 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
     inputGui.Show("w460 h260")
     ApplyWindowTransparency(inputGui)
     inputEdit.Focus()
+    SendMessage(0x00B1, 0, -1, , "ahk_id " . inputEdit.Hwnd)
     RedrawGuiWindow(inputGui)
 
     WinWaitClose("ahk_id " . inputGui.Hwnd)
@@ -1839,6 +1865,7 @@ CenterControlVertically(referenceControl, targetControl)
 
 MatchDropDownHeight(referenceControl, dropDownControl)
 {
+    static MAX_VISIBLE_ITEMS := 8
     static CB_SETITEMHEIGHT := 0x0153
     static CB_GETITEMHEIGHT := 0x0154
     static CB_GETCOUNT := 0x0146
@@ -1885,7 +1912,7 @@ MatchDropDownHeight(referenceControl, dropDownControl)
     {
         SendMessage(
             CB_SETMINVISIBLE,
-            Min(3, itemCount),
+            Min(MAX_VISIBLE_ITEMS, itemCount),
             ,
             ,
             "ahk_id " . dropDownControl.Hwnd
