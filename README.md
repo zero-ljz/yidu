@@ -23,6 +23,7 @@
 - 在鼠标指针附近显示翻译结果
 - 支持长文本分段翻译、失败重试和请求超时处理
 - 支持结果复制、窗口置顶和翻译结果朗读
+- 长文本朗读优先按句末或换行分段，首段最多 200 字、后续最多 500 字；首段完成即播放，并提前合成下一段
 - 支持中文普通话、方言、粤语、台湾腔及英语音色
 - 支持开机自启、管理员模式和托盘菜单设置
 - 支持跟随系统、深色、浅色界面以及可选的窗口半透明效果
@@ -76,6 +77,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\msix\build-msix.
 MSIX 清单声明 `runFullTrust`，用于全局快捷键、选区读取、剪贴板、托盘程序和本地配置。MSIX 版本不提供管理员模式，并通过 Windows StartupTask 管理开机自启。
 
 提交前可参考 [Microsoft Store 审核说明](packaging/msix/STORE-CERTIFICATION-NOTES.md) 核对受限能力、启动任务和隐私披露。
+
+## 朗读测试
+
+安装 AutoHotkey v2 后，可运行离线检查，验证分段、连续播放队列、超时与停止清理：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\run-speech-tests.ps1
+```
+
+添加 `-Online` 可验证真实语音合成和 Windows 播放接口；该检查仅提交固定测试文本，并静音播放。
 
 ## 使用方法
 

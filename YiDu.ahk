@@ -90,6 +90,7 @@ global SpeechWorkerProcessId := 0
 global SpeechWorkerScriptPath := ""
 global SpeechWorkerRequestPath := ""
 global SpeechWorkerReadyPath := ""
+global SpeechSession := 0
 
 LoadConfig()
 SetApplicationIcon()
@@ -2957,15 +2958,18 @@ SpeakCurrentTranslation(*)
 
 StartEdgeSpeech(text, voice)
 {
-    global ResultSpeakButton, SpeechAudioPath, SpeechErrorPath, SpeechDonePath
-    global SpeechBusy, SpeechStartedAt
-    global SpeechTimeoutMs, SpeechSynthesisPending
-    global SpeechWorkerRequestPath
+    global ResultSpeakButton, SpeechBusy, SpeechSession
+
+    Critical
 
     if !EnsureOnlineServicesConsent()
         return
 
     StopSpeech()
+
+    chunks := SplitSpeechText(text)
+    if chunks.Length = 0
+        return
 
     if !EnsureSpeechWorker()
     {
@@ -2974,12 +2978,99 @@ StartEdgeSpeech(text, voice)
     }
 
     uniqueId := DllCall("GetCurrentProcessId", "UInt") . "_" . A_TickCount
-    SpeechAudioPath := A_Temp . "\YiDuTTS_" . uniqueId . ".mp3"
-    SpeechErrorPath := A_Temp . "\YiDuTTS_" . uniqueId . ".error"
-    SpeechDonePath := A_Temp . "\YiDuTTS_" . uniqueId . ".done"
+    SpeechSession := {
+        Chunks: chunks,
+        Voice: voice,
+        BasePath: A_Temp . "\YiDuTTS_" . uniqueId,
+        NextIndex: 1,
+        PendingChunk: 0,
+        ReadyChunk: 0,
+        PlayingChunk: 0
+    }
+    SpeechBusy := true
+    if IsObject(ResultSpeakButton)
+        ResultSpeakButton.Text := "停止"
+    QueueNextSpeechChunk()
+}
+
+
+SplitSpeechText(text)
+{
+    chunks := []
+    start := 1
+    textLength := StrLen(text)
+
+    while start <= textLength
+    {
+        maximumLength := chunks.Length = 0 ? 200 : 500
+        minimumLength := chunks.Length = 0 ? 100 : 300
+        length := Min(maximumLength, textLength - start + 1)
+
+        if start + length <= textLength
+        {
+            ; Prefer sentence endings, then clauses or whitespace near the limit.
+            window := SubStr(text, start, length)
+            splitPosition := 0
+            position := 1
+            while position := RegExMatch(
+                window, "[。！？!?]+[”’」』）)]*|\.(?=\s)|\r?\n", &boundary, position
+            )
+            {
+                endPosition := position + boundary.Len - 1
+                if endPosition >= minimumLength
+                    splitPosition := endPosition
+                position += boundary.Len
+            }
+
+            if !splitPosition
+            {
+                position := 1
+                while position := RegExMatch(window, "[，、；,:;\s]+", &boundary, position)
+                {
+                    endPosition := position + boundary.Len - 1
+                    if endPosition >= minimumLength
+                        splitPosition := endPosition
+                    position += boundary.Len
+                }
+            }
+
+            if splitPosition
+                length := splitPosition
+
+            lastCodeUnit := Ord(SubStr(text, start + length - 1, 1))
+            if lastCodeUnit >= 0xD800 && lastCodeUnit <= 0xDBFF
+                length -= 1
+        }
+
+        chunk := SubStr(text, start, length)
+        if RegExMatch(chunk, "\S")
+            chunks.Push(chunk)
+        start += length
+    }
+
+    return chunks
+}
+
+
+QueueNextSpeechChunk()
+{
+    global SpeechSession, SpeechAudioPath, SpeechErrorPath, SpeechDonePath
+    global SpeechWorkerRequestPath, SpeechSynthesisPending, SpeechStartedAt
+
+    if !IsObject(SpeechSession) || SpeechSynthesisPending
+        || IsObject(SpeechSession.ReadyChunk)
+        || SpeechSession.NextIndex > SpeechSession.Chunks.Length
+        return
+
+    index := SpeechSession.NextIndex
+    chunkPath := SpeechSession.BasePath . "_" . index
+    SpeechAudioPath := chunkPath . ".mp3"
+    SpeechErrorPath := chunkPath . ".error"
+    SpeechDonePath := chunkPath . ".done"
+    SpeechSession.PendingChunk := {AudioPath: SpeechAudioPath}
     requestTempPath := SpeechWorkerRequestPath . ".tmp"
-    payload := Base64EncodeUtf8(text) . "`n"
-        . Base64EncodeUtf8(voice) . "`n"
+    payload := Base64EncodeUtf8(SpeechSession.Chunks[index]) . "`n"
+        . Base64EncodeUtf8(SpeechSession.Voice) . "`n"
         . Base64EncodeUtf8(SpeechAudioPath) . "`n"
         . Base64EncodeUtf8(SpeechErrorPath) . "`n"
         . Base64EncodeUtf8(SpeechDonePath)
@@ -3006,12 +3097,9 @@ StartEdgeSpeech(text, voice)
         return
     }
 
-    SpeechBusy := true
+    SpeechSession.NextIndex += 1
     SpeechSynthesisPending := true
     SpeechStartedAt := A_TickCount
-    SpeechTimeoutMs := 60000
-    if IsObject(ResultSpeakButton)
-        ResultSpeakButton.Text := "停止"
     SetTimer(CheckSpeechSynthesis, 50)
 }
 
@@ -3021,6 +3109,9 @@ CheckSpeechSynthesis()
     global SpeechAudioPath, SpeechErrorPath, SpeechDonePath
     global SpeechStartedAt, SpeechTimeoutMs
     global SpeechSynthesisPending, SpeechWorkerProcessId
+    global SpeechSession
+
+    Critical
 
     if !SpeechSynthesisPending
     {
@@ -3028,22 +3119,22 @@ CheckSpeechSynthesis()
         return
     }
 
-    if A_TickCount - SpeechStartedAt >= SpeechTimeoutMs
-    {
-        StopSpeech()
-        TrayTip("在线语音合成超时，请稍后重试。", "译读朗读", 2)
-        return
-    }
-
-    if !SpeechWorkerProcessId || !ProcessExist(SpeechWorkerProcessId)
-    {
-        StopSpeech()
-        TrayTip("在线语音工作进程意外退出。", "译读朗读", 2)
-        return
-    }
-
     if !FileExist(SpeechDonePath)
+    {
+        if A_TickCount - SpeechStartedAt >= SpeechTimeoutMs
+        {
+            StopSpeech()
+            TrayTip("在线语音合成超时，请稍后重试。", "译读朗读", 2)
+            return
+        }
+
+        if !SpeechWorkerProcessId || !ProcessExist(SpeechWorkerProcessId)
+        {
+            StopSpeech()
+            TrayTip("在线语音工作进程意外退出。", "译读朗读", 2)
+        }
         return
+    }
 
     SetTimer(CheckSpeechSynthesis, 0)
     SpeechSynthesisPending := false
@@ -3071,16 +3162,34 @@ CheckSpeechSynthesis()
 
     try
     {
-        if !FileExist(SpeechAudioPath)
+        if !FileExist(SpeechAudioPath) || FileGetSize(SpeechAudioPath) = 0
             throw Error("语音服务没有生成音频。")
 
-        PlaySpeechAudio(SpeechAudioPath)
+        SpeechSession.ReadyChunk := SpeechSession.PendingChunk
+        SpeechSession.PendingChunk := 0
+        SpeechAudioPath := ""
+        StartReadySpeechChunk()
     }
     catch Error as err
     {
         StopSpeech()
         TrayTip("无法播放语音：" . err.Message, "译读朗读", 2)
     }
+}
+
+
+StartReadySpeechChunk()
+{
+    global SpeechSession
+
+    if !IsObject(SpeechSession) || IsObject(SpeechSession.PlayingChunk)
+        || !IsObject(SpeechSession.ReadyChunk)
+        return
+
+    SpeechSession.PlayingChunk := SpeechSession.ReadyChunk
+    SpeechSession.ReadyChunk := 0
+    PlaySpeechAudio(SpeechSession.PlayingChunk.AudioPath)
+    QueueNextSpeechChunk()
 }
 
 
@@ -3107,13 +3216,15 @@ PlaySpeechAudio(audioPath)
         throw Error(GetMciErrorMessage(result))
     }
 
-    SetTimer(CheckSpeechPlayback, 200)
+    SetTimer(CheckSpeechPlayback, 50)
 }
 
 
 CheckSpeechPlayback()
 {
-    global SpeechMciAlias
+    global SpeechMciAlias, SpeechSession, SpeechSynthesisPending
+
+    Critical
 
     if SpeechMciAlias = ""
     {
@@ -3123,7 +3234,28 @@ CheckSpeechPlayback()
 
     mode := MciGetMode(SpeechMciAlias)
 
-    if mode != "playing" && mode != "seeking"
+    if mode = "playing" || mode = "seeking"
+        return
+
+    SetTimer(CheckSpeechPlayback, 0)
+    MciSend("close " . SpeechMciAlias)
+    SpeechMciAlias := ""
+    if IsObject(SpeechSession) && IsObject(SpeechSession.PlayingChunk)
+    {
+        try FileDelete(SpeechSession.PlayingChunk.AudioPath)
+        SpeechSession.PlayingChunk := 0
+    }
+
+    try StartReadySpeechChunk()
+    catch Error as err
+    {
+        StopSpeech()
+        TrayTip("无法播放语音：" . err.Message, "译读朗读", 2)
+        return
+    }
+
+    if IsObject(SpeechSession) && !IsObject(SpeechSession.PlayingChunk)
+        && !SpeechSynthesisPending && !IsObject(SpeechSession.ReadyChunk)
         StopSpeech()
 }
 
@@ -3133,39 +3265,56 @@ StopSpeech(*)
     global ResultSpeakButton, SpeechAudioPath, SpeechErrorPath, SpeechDonePath
     global SpeechBusy, SpeechStartedAt, SpeechMciAlias
     global SpeechTimeoutMs, SpeechSynthesisPending
+    global SpeechSession
 
-    SetTimer(CheckSpeechSynthesis, 0)
-    SetTimer(CheckSpeechPlayback, 0)
-
-    if SpeechSynthesisPending
-        StopSpeechWorker()
-
-    if SpeechMciAlias != ""
+    previousCritical := A_IsCritical
+    Critical
+    try
     {
-        MciSend("stop " . SpeechMciAlias)
-        MciSend("close " . SpeechMciAlias)
-        SpeechMciAlias := ""
+        SetTimer(CheckSpeechSynthesis, 0)
+        SetTimer(CheckSpeechPlayback, 0)
+
+        if SpeechSynthesisPending
+            StopSpeechWorker()
+
+        if SpeechMciAlias != ""
+        {
+            MciSend("stop " . SpeechMciAlias)
+            MciSend("close " . SpeechMciAlias)
+            SpeechMciAlias := ""
+        }
+
+        if SpeechAudioPath != "" && FileExist(SpeechAudioPath)
+            try FileDelete(SpeechAudioPath)
+
+        if SpeechErrorPath != "" && FileExist(SpeechErrorPath)
+            try FileDelete(SpeechErrorPath)
+
+        if SpeechDonePath != "" && FileExist(SpeechDonePath)
+            try FileDelete(SpeechDonePath)
+
+        if IsObject(SpeechSession)
+        {
+            for chunk in [SpeechSession.PlayingChunk, SpeechSession.ReadyChunk]
+            {
+                if IsObject(chunk) && FileExist(chunk.AudioPath)
+                    try FileDelete(chunk.AudioPath)
+            }
+        }
+        SpeechSession := 0
+
+        SpeechAudioPath := ""
+        SpeechErrorPath := ""
+        SpeechDonePath := ""
+        SpeechBusy := false
+        SpeechStartedAt := 0
+        SpeechTimeoutMs := 60000
+        SpeechSynthesisPending := false
+
+        if IsObject(ResultSpeakButton)
+            ResultSpeakButton.Text := "朗读"
     }
-
-    if SpeechAudioPath != "" && FileExist(SpeechAudioPath)
-        try FileDelete(SpeechAudioPath)
-
-    if SpeechErrorPath != "" && FileExist(SpeechErrorPath)
-        try FileDelete(SpeechErrorPath)
-
-    if SpeechDonePath != "" && FileExist(SpeechDonePath)
-        try FileDelete(SpeechDonePath)
-
-    SpeechAudioPath := ""
-    SpeechErrorPath := ""
-    SpeechDonePath := ""
-    SpeechBusy := false
-    SpeechStartedAt := 0
-    SpeechTimeoutMs := 60000
-    SpeechSynthesisPending := false
-
-    if IsObject(ResultSpeakButton)
-        ResultSpeakButton.Text := "朗读"
+    finally Critical(previousCritical)
 }
 
 
@@ -3635,14 +3784,7 @@ function Invoke-EdgeSpeechRequest(
         [IO.FileAccess]::Write,
         [IO.FileShare]::Read)
     try {
-        for ($start = 0; $start -lt $text.Length; $start += $length) {
-            $length = [Math]::Min(1000, $text.Length - $start)
-            if ($start + $length -lt $text.Length -and
-                [char]::IsHighSurrogate($text[$start + $length - 1])) {
-                $length--
-            }
-            Invoke-EdgeTtsChunk $text.Substring($start, $length) $audioStream
-        }
+        Invoke-EdgeTtsChunk $text $audioStream
     }
     finally { $audioStream.Dispose() }
     if ($script:audioBytes -eq 0) {
