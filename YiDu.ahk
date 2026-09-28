@@ -14,6 +14,7 @@ global CONFIG := {
     Hotkey: "^F1",
     SpeakHotkey: "^F2",
     SpeechVoice: "zh-CN-XiaoyiNeural",
+    SpeechSpeed: 1,
     TranslationService: "tencent",
     RunAsAdmin: false,
     ShowResultAtMouse: true,
@@ -50,6 +51,13 @@ global SPEECH_VOICES := [
 ]
 
 global SPEECH_VOICE_GROUPS := ["普通话", "方言", "粤语", "台湾", "英语"]
+global SPEECH_SPEEDS := [
+    {Value: 0.75, Label: "0.75×", Rate: "-25%"},
+    {Value: 1, Label: "1×", Rate: "+0%"},
+    {Value: 1.25, Label: "1.25×", Rate: "+25%"},
+    {Value: 1.5, Label: "1.5×", Rate: "+50%"},
+    {Value: 2, Label: "2×", Rate: "+100%"}
+]
 
 global TRANSLATION_SERVICES := [
     {Label: "腾讯", Service: "tencent"},
@@ -80,6 +88,7 @@ global ActiveTranslationRequest := 0
 global TranslationServiceTrayMenu := 0
 global SpeechVoiceTrayMenu := 0
 global SpeechVoiceTrayMenus := Map()
+global SpeechSpeedTrayMenu := 0
 global ColorThemeTrayMenu := 0
 global AppearanceTrayMenu := 0
 global SpeechAudioPath := ""
@@ -128,7 +137,7 @@ SetApplicationIcon()
 
 LoadConfig()
 {
-    global CONFIG, CONFIG_PATH, IS_PACKAGED, ShowResultAtMouse
+    global CONFIG, CONFIG_PATH, IS_PACKAGED, ShowResultAtMouse, SPEECH_SPEEDS
 
     EnsureConfigDirectory()
 
@@ -151,6 +160,11 @@ LoadConfig()
 
     if GetSpeechVoiceIndex(CONFIG.SpeechVoice) = 0
         CONFIG.SpeechVoice := "zh-CN-XiaoyiNeural"
+
+    speedIndex := GetSpeechSpeedIndex(Trim(IniRead(
+        CONFIG_PATH, "Settings", "SpeechSpeed", 1
+    )))
+    CONFIG.SpeechSpeed := speedIndex ? SPEECH_SPEEDS[speedIndex].Value : 1
 
     CONFIG.TranslationService := Trim(IniRead(
         CONFIG_PATH,
@@ -208,6 +222,7 @@ CreateDefaultConfig()
     IniWrite(CONFIG.Hotkey, CONFIG_PATH, "Settings", "Hotkey")
     IniWrite(CONFIG.SpeakHotkey, CONFIG_PATH, "Settings", "SpeakHotkey")
     IniWrite(CONFIG.SpeechVoice, CONFIG_PATH, "Settings", "SpeechVoice")
+    IniWrite(CONFIG.SpeechSpeed, CONFIG_PATH, "Settings", "SpeechSpeed")
     IniWrite(
         CONFIG.TranslationService,
         CONFIG_PATH,
@@ -262,6 +277,22 @@ GetSpeechVoiceIndex(voice)
             return index
     }
 
+    return 0
+}
+
+
+GetSpeechSpeedIndex(speed)
+{
+    global SPEECH_SPEEDS
+
+    if !IsNumber(speed)
+        return 0
+
+    for index, item in SPEECH_SPEEDS
+    {
+        if item.Value = speed + 0
+            return index
+    }
     return 0
 }
 
@@ -477,6 +508,7 @@ SetupTrayMenu()
     global TRANSLATION_SERVICES, SPEECH_VOICES, SPEECH_VOICE_GROUPS
     global TranslationServiceTrayMenu, SpeechVoiceTrayMenu, ColorThemeTrayMenu
     global SpeechVoiceTrayMenus, AppearanceTrayMenu, SpeechTrayMenuReady
+    global SPEECH_SPEEDS, SpeechSpeedTrayMenu
 
     A_TrayMenu.Delete()
     translateHotkeyText := FormatHotkey(CONFIG.Hotkey)
@@ -518,6 +550,11 @@ SetupTrayMenu()
 
     UpdateSpeechVoiceTrayChecks()
     A_TrayMenu.Add("朗读音色", SpeechVoiceTrayMenu)
+    SpeechSpeedTrayMenu := Menu()
+    for item in SPEECH_SPEEDS
+        SpeechSpeedTrayMenu.Add(item.Label, SetSpeechSpeed.Bind(item.Value))
+    UpdateSpeechSpeedControls()
+    A_TrayMenu.Add("朗读速度", SpeechSpeedTrayMenu)
     A_TrayMenu.Add("在鼠标指针处显示结果", ToggleResultAtMouse)
 
     if ShowResultAtMouse
@@ -1549,16 +1586,21 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
     pinButton := inputGui.AddButton("xm y+10 w72 h26", "钉住")
     selectorList := 0
     categoryList := 0
+    speedButton := 0
+    speedTooltip := 0
     ; CBS_OWNERDRAWFIXED | CBS_HASSTRINGS keeps owner-drawn labels as Unicode.
 
     if selectorType = "voice"
     {
         categoryList := inputGui.AddDropDownList(
-            "x102 yp w80 +0x210", SPEECH_VOICE_GROUPS
+            "x108 yp w80 +0x210", SPEECH_VOICE_GROUPS
         )
         selectorList := inputGui.AddDropDownList(
-            "x190 yp w220 +0x210"
+            "x196 yp w150 +0x210"
         )
+        speedButton := inputGui.AddButton("x354 yp w56 h26", GetSpeechSpeedLabel())
+        speedButton.OnEvent("Click", CycleSpeechSpeed)
+        speedTooltip := CreateControlTooltip(inputGui, speedButton, "朗读速度，点击切换")
         voiceIndex := GetSpeechVoiceIndex(CONFIG.SpeechVoice)
         selectedGroup := voiceIndex ? SPEECH_VOICES[voiceIndex].Group : SPEECH_VOICE_GROUPS[1]
         categoryList.Choose(selectedGroup)
@@ -1593,6 +1635,8 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
         PinButton: pinButton,
         SelectorList: selectorList,
         CategoryList: categoryList,
+        SpeedButton: speedButton,
+        SpeedTooltip: speedTooltip,
         SubmitButton: submitButton,
         CancelButton: cancelButton,
         State: state
@@ -1616,12 +1660,15 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
             pinButton,
             selectorList,
             categoryList,
+            speedButton,
             submitButton,
             cancelButton
         )
     )
 
     themedControls := [inputEdit, pinButton, submitButton, cancelButton]
+    if IsObject(speedButton)
+        themedControls.Push(speedButton)
 
     for control in [categoryList, selectorList]
     {
@@ -1640,6 +1687,12 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
         CenterControlVertically(pinButton, control)
     }
 
+    if selectorType = "voice"
+    {
+        dropDownDpi := DllCall("GetDpiForWindow", "Ptr", selectorList.Hwnd, "UInt")
+        SendMessage(0x0160, Round(220 * dropDownDpi / 96), , , "ahk_id " . selectorList.Hwnd)
+    }
+
     inputGui.Show("w" . inputWidth . " h260")
     ApplyWindowTransparency(inputGui)
     inputEdit.Focus()
@@ -1649,6 +1702,31 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
     WinWaitClose("ahk_id " . inputGui.Hwnd)
     ActiveInputDialog := 0
     return state.Confirmed ? state.Text : ""
+}
+
+
+CreateControlTooltip(guiObject, control, text)
+{
+    tooltipHwnd := DllCall("CreateWindowExW", "UInt", 8, "Str", "tooltips_class32",
+        "Ptr", 0, "UInt", 0x80000003, "Int", 0, "Int", 0, "Int", 0, "Int", 0,
+        "Ptr", guiObject.Hwnd, "Ptr", 0, "Ptr", 0, "Ptr", 0, "Ptr")
+    if !tooltipHwnd
+        return 0
+
+    textBuffer := Buffer(StrPut(text, "UTF-16") * 2)
+    StrPut(text, textBuffer, "UTF-16")
+    toolInfo := Buffer(A_PtrSize = 8 ? 72 : 48, 0)
+    ; TTF_IDISHWND | TTF_SUBCLASS lets the native tooltip follow control hover.
+    NumPut("UInt", toolInfo.Size, "UInt", 0x11, toolInfo)
+    NumPut("Ptr", guiObject.Hwnd, "UPtr", control.Hwnd, toolInfo, 8)
+    NumPut("Ptr", textBuffer.Ptr, toolInfo, 8 + (3 * A_PtrSize) + 16)
+    if !DllCall("SendMessageW", "Ptr", tooltipHwnd, "UInt", 0x0432,
+        "Ptr", 0, "Ptr", toolInfo.Ptr, "Ptr")
+    {
+        DllCall("DestroyWindow", "Ptr", tooltipHwnd)
+        return 0
+    }
+    return {Hwnd: tooltipHwnd, TextBuffer: textBuffer}
 }
 
 
@@ -1723,6 +1801,53 @@ SetSpeechVoice(voice, *)
     CONFIG.SpeechVoice := voice
     WriteConfigSetting("SpeechVoice", CONFIG.SpeechVoice)
     UpdateSpeechVoiceTrayChecks()
+}
+
+
+GetSpeechSpeedLabel()
+{
+    global CONFIG, SPEECH_SPEEDS
+    return SPEECH_SPEEDS[GetSpeechSpeedIndex(CONFIG.SpeechSpeed)].Label
+}
+
+
+CycleSpeechSpeed(*)
+{
+    global CONFIG, SPEECH_SPEEDS
+    index := GetSpeechSpeedIndex(CONFIG.SpeechSpeed)
+    SetSpeechSpeed(SPEECH_SPEEDS[Mod(index, SPEECH_SPEEDS.Length) + 1].Value)
+}
+
+
+SetSpeechSpeed(speed, *)
+{
+    global CONFIG, SPEECH_SPEEDS
+    index := GetSpeechSpeedIndex(speed)
+    if !index
+        return
+
+    speed := SPEECH_SPEEDS[index].Value
+    WriteConfigSetting("SpeechSpeed", speed)
+    CONFIG.SpeechSpeed := speed
+    UpdateSpeechSpeedControls()
+}
+
+
+UpdateSpeechSpeedControls()
+{
+    global CONFIG, SPEECH_SPEEDS, SpeechSpeedTrayMenu, ActiveInputDialog
+    if IsObject(SpeechSpeedTrayMenu)
+    {
+        for item in SPEECH_SPEEDS
+        {
+            SpeechSpeedTrayMenu.Uncheck(item.Label)
+            if item.Value = CONFIG.SpeechSpeed
+                SpeechSpeedTrayMenu.Check(item.Label)
+        }
+    }
+
+    if IsObject(ActiveInputDialog) && IsObject(ActiveInputDialog.SpeedButton)
+        ActiveInputDialog.SpeedButton.Text := GetSpeechSpeedLabel()
 }
 
 
@@ -1924,6 +2049,7 @@ ResizeInputWindow(
     pinButton,
     selectorList,
     categoryList,
+    speedButton,
     submitButton,
     cancelButton,
     guiObject,
@@ -1941,16 +2067,20 @@ ResizeInputWindow(
     if IsObject(selectorList)
     {
         selectorList.GetPos(, , &selectorWidth)
-        selectorList.Move(width - 150 - selectorWidth)
+        selectorRight := width - (IsObject(speedButton) ? 214 : 150)
+        selectorList.Move(selectorRight - selectorWidth)
         CenterControlVertically(pinButton, selectorList)
 
         if IsObject(categoryList)
         {
             categoryList.GetPos(, , &categoryWidth)
-            categoryList.Move(width - 158 - selectorWidth - categoryWidth)
+            categoryList.Move(selectorRight - 8 - selectorWidth - categoryWidth)
             CenterControlVertically(pinButton, categoryList)
         }
     }
+
+    if IsObject(speedButton)
+        speedButton.Move(width - 206, height - 36)
 
     submitButton.Move(width - 142, height - 36)
     cancelButton.Move(width - 62, height - 36)
@@ -3040,7 +3170,7 @@ SpeakCurrentTranslation(*)
 
 StartEdgeSpeech(text, voice)
 {
-    global ResultSpeakButton, SpeechBusy, SpeechSession
+    global CONFIG, SPEECH_SPEEDS, ResultSpeakButton, SpeechBusy, SpeechSession
 
     Critical
 
@@ -3063,6 +3193,7 @@ StartEdgeSpeech(text, voice)
     SpeechSession := {
         Chunks: chunks,
         Voice: voice,
+        Rate: SPEECH_SPEEDS[GetSpeechSpeedIndex(CONFIG.SpeechSpeed)].Rate,
         BasePath: A_Temp . "\YiDuTTS_" . uniqueId,
         NextIndex: 1,
         PendingChunk: 0,
@@ -3156,7 +3287,8 @@ QueueNextSpeechChunk()
         . Base64EncodeUtf8(SpeechSession.Voice) . "`n"
         . Base64EncodeUtf8(SpeechAudioPath) . "`n"
         . Base64EncodeUtf8(SpeechErrorPath) . "`n"
-        . Base64EncodeUtf8(SpeechDonePath)
+        . Base64EncodeUtf8(SpeechDonePath) . "`n"
+        . Base64EncodeUtf8(SpeechSession.Rate)
 
     try
     {
@@ -3794,7 +3926,7 @@ function Invoke-EdgeTtsChunk([string]$chunk, [IO.Stream]$audioStream) {
             $escapedText = [Security.SecurityElement]::Escape($chunk)
             $ssml = "<speak version='1.0' " +
                 "xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>" +
-                "<voice name='$voice'><prosody pitch='+0Hz' rate='+0%' volume='+0%'>" +
+                "<voice name='$voice'><prosody pitch='+0Hz' rate='$rate' volume='+0%'>" +
                 $escapedText + '</prosody></voice></speak>'
             $request = 'X-RequestId:' + $requestId + $crlf +
                 'Content-Type:application/ssml+xml' + $crlf +
@@ -3852,8 +3984,12 @@ function Invoke-EdgeSpeechRequest(
     [string]$voice,
     [string]$audioPath,
     [string]$errorPath,
-    [string]$donePath) {
+    [string]$donePath,
+    [string]$rate = '+0%') {
     try {
+    if ($rate -notin @('-25%', '+0%', '+25%', '+50%', '+100%')) {
+        throw '朗读速度无效。'
+    }
     if (Test-Path -LiteralPath $audioPath) { Remove-Item -LiteralPath $audioPath -Force }
     if (Test-Path -LiteralPath $errorPath) { Remove-Item -LiteralPath $errorPath -Force }
     if (Test-Path -LiteralPath $donePath) { Remove-Item -LiteralPath $donePath -Force }
@@ -3911,7 +4047,7 @@ try {
                     $requestPath,
                     [Text.Encoding]::UTF8)
                 Remove-Item -LiteralPath $requestPath -Force
-                if ($requestLines.Length -ne 5) {
+                if ($requestLines.Length -ne 6) {
                     throw '语音任务格式无效。'
                 }
 
@@ -3925,7 +4061,9 @@ try {
                     [Convert]::FromBase64String($requestLines[3]))
                 $donePath = [Text.Encoding]::UTF8.GetString(
                     [Convert]::FromBase64String($requestLines[4]))
-                Invoke-EdgeSpeechRequest $text $voice $audioPath $errorPath $donePath
+                $rate = [Text.Encoding]::UTF8.GetString(
+                    [Convert]::FromBase64String($requestLines[5]))
+                Invoke-EdgeSpeechRequest $text $voice $audioPath $errorPath $donePath $rate
             }
             catch {
                 if ($errorPath) {

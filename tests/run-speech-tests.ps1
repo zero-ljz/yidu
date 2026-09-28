@@ -65,7 +65,10 @@ try {
             '-File', ('"' + $smokePath + '"'), '-WorkerPath', ('"' + $workerPath + '"'),
             '-OutputDirectory', ('"' + $testDirectory + '"')) -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
         try {
+            # Cache the process handle so Windows PowerShell can read ExitCode after waiting.
+            $null = $process.Handle
             if (-not $process.WaitForExit(60000)) { throw 'Online speech smoke test timed out.' }
+            $process.WaitForExit()
             Get-Content -LiteralPath $stdoutPath
             if ($process.ExitCode -ne 0) { throw ([IO.File]::ReadAllText($stderrPath)) }
         }

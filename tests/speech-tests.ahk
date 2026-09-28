@@ -15,6 +15,7 @@ global TestAppearanceUpdates := 0
 global ActiveInputDialog := 0
 global ResultGui := 0
 global TestInputError := ""
+global TestTooltipHwnd := 0
 
 DetectHiddenWindows(true)
 OnMessage(0x002B, DrawDropDownItem)
@@ -76,10 +77,23 @@ TestTraySettings()
     global CONFIG, CONFIG_PATH, SPEECH_VOICES, SpeechVoiceTrayMenu, SpeechVoiceTrayMenus
     global AppearanceTrayMenu, ColorThemeTrayMenu, TestAppearanceUpdates
     global TestFirstRunCount, TestNotifications
+    global SPEECH_SPEEDS, SpeechSpeedTrayMenu
     Assert(!CONFIG.WindowTransparency, "New default transparency")
     Assert(CONFIG.SpeechVoice = "zh-CN-XiaoyiNeural", "Default voice preserved")
+    Assert(CONFIG.SpeechSpeed = 1, "Default speech speed")
     LoadConfig()
     Assert(IniRead(CONFIG_PATH, "Settings", "WindowTransparency") = "0", "New config defaults")
+    Assert(IniRead(CONFIG_PATH, "Settings", "SpeechSpeed") = "1", "Default speech speed persisted")
+    IniDelete(CONFIG_PATH, "Settings", "SpeechSpeed")
+    LoadConfig()
+    Assert(CONFIG.SpeechSpeed = 1, "Older config without speed")
+    for invalidSpeed in ["fast", "3", "", "0", "-1"]
+    {
+        IniWrite(invalidSpeed, CONFIG_PATH, "Settings", "SpeechSpeed")
+        LoadConfig()
+        Assert(CONFIG.SpeechSpeed = 1, "Invalid speed falls back to normal")
+    }
+    IniWrite("1.5", CONFIG_PATH, "Settings", "SpeechSpeed")
     IniWrite(1, CONFIG_PATH, "Settings", "WindowTransparency")
     IniWrite("zh-HK-HiuGaaiNeural", CONFIG_PATH, "Settings", "SpeechVoice")
     IniWrite("dark", CONFIG_PATH, "Settings", "ColorTheme")
@@ -87,12 +101,16 @@ TestTraySettings()
     LoadConfig()
     Assert(CONFIG.WindowTransparency && CONFIG.ColorTheme = "dark", "Saved appearance preserved")
     Assert(CONFIG.SpeechVoice = "zh-HK-HiuGaaiNeural", "Saved voice preserved")
+    Assert(CONFIG.SpeechSpeed = 1.5, "Saved speech speed preserved")
     TestStartup()
     Assert(TestNotifications.Length = 0 && TestFirstRunCount = 0, "Existing user quiet startup")
     Assert(MenuItemState(A_TrayMenu, "停止朗读") & 3, "Idle stop item disabled")
     Assert(MenuItemPosition(A_TrayMenu, "语音角色") = -1, "Old voice menu removed")
     Assert(MenuItemPosition(A_TrayMenu, "窗口半透明") = -1, "Transparency moved into appearance")
     Assert(MenuItemPosition(A_TrayMenu, "朗读音色") >= 0, "Voice root menu")
+    Assert(MenuItemPosition(A_TrayMenu, "朗读速度") >= 0, "Speed root menu")
+    for item in SPEECH_SPEEDS
+        Assert(!!(MenuItemState(SpeechSpeedTrayMenu, item.Label) & 8) = (item.Value = CONFIG.SpeechSpeed), "Speed menu selection")
     Assert(SpeechVoiceTrayMenus.Count = 5, "Five voice groups")
     for item in SPEECH_VOICES
         Assert(MenuItemPosition(SpeechVoiceTrayMenus[item.Group], item.Label) >= 0, "Voice assigned to group")
@@ -124,22 +142,24 @@ TestTraySettings()
 
 TestInputWindows()
 {
-    global CONFIG, TestInputError
+    global CONFIG, TestInputError, TestTooltipHwnd
     for mode in ["voice", "voice", "translation", ""]
     {
         TestInputError := ""
+        TestTooltipHwnd := 0
         Critical "Off"
         result := PromptForText("Input test", "朗读", mode)
         Critical
         Assert(TestInputError = "", TestInputError)
         Assert(result = "", "Input cancellation")
+        Assert(!TestTooltipHwnd || !DllCall("IsWindow", "Ptr", TestTooltipHwnd), "Tooltip cleaned up with input window")
     }
 }
 
 InspectTestInput(mode)
 {
     global ActiveInputDialog, CONFIG, CONFIG_PATH, SPEECH_VOICES, SPEECH_VOICE_GROUPS
-    global TestInputError
+    global TestInputError, TestTooltipHwnd, SPEECH_SPEEDS, SpeechSpeedTrayMenu
     Critical
     if !IsObject(ActiveInputDialog)
         return
@@ -153,6 +173,36 @@ InspectTestInput(mode)
         Assert(IsObject(dialog), "Input window initialized")
         if mode = "voice"
         {
+            Assert(dialog.SpeedButton.Text = GetSpeechSpeedLabel(), "Saved speed restored on button")
+            dialog.SelectorList.GetPos(, , &voiceWidth)
+            Assert(voiceWidth = 150, "Voice selector narrowed")
+            Assert(IsObject(dialog.SpeedTooltip), "Native speed tooltip created")
+            TestTooltipHwnd := dialog.SpeedTooltip.Hwnd
+            Assert(DllCall("IsWindow", "Ptr", TestTooltipHwnd), "Tooltip window is alive")
+            Assert(StrGet(dialog.SpeedTooltip.TextBuffer, "UTF-16") = "朗读速度，点击切换", "Speed tooltip text")
+            SetSpeechSpeed(0.75)
+            for speed in [1, 1.25, 1.5, 2, 0.75]
+            {
+                buttonId := DllCall("GetDlgCtrlID", "Ptr", dialog.SpeedButton.Hwnd, "Int")
+                DllCall("PostMessageW", "Ptr", dialog.Gui.Hwnd, "UInt", 0x111,
+                    "UPtr", buttonId, "Ptr", dialog.SpeedButton.Hwnd)
+                Critical "Off"
+                Sleep(30)
+                Critical
+                Assert(CONFIG.SpeechSpeed = speed, "Speed button cycles and wraps")
+                Assert(dialog.SpeedButton.Text = GetSpeechSpeedLabel(), "Speed button label updated")
+                Assert(MenuItemState(SpeechSpeedTrayMenu, GetSpeechSpeedLabel()) & 8, "Speed button syncs tray")
+                Assert(IniRead(CONFIG_PATH, "Settings", "SpeechSpeed") + 0 = speed, "Speed choice persisted")
+                dialog.SpeedButton.GetPos(, , &buttonWidth)
+                Assert(buttonWidth = 56, "Speed button width stays fixed")
+            }
+            speedCommand := DllCall("GetMenuItemID", "Ptr", SpeechSpeedTrayMenu.Handle,
+                "Int", MenuItemPosition(SpeechSpeedTrayMenu, "2×"), "UInt")
+            DllCall("PostMessageW", "Ptr", A_ScriptHwnd, "UInt", 0x111, "UPtr", speedCommand, "Ptr", 0)
+            Critical "Off"
+            Sleep(30)
+            Critical
+            Assert(CONFIG.SpeechSpeed = 2 && dialog.SpeedButton.Text = "2×", "Tray speed syncs input button")
             savedIndex := GetSpeechVoiceIndex(CONFIG.SpeechVoice)
             Assert(dialog.CategoryList.Text = SPEECH_VOICES[savedIndex].Group, "Saved category restored")
             Assert(dialog.State.VoiceOptions[dialog.SelectorList.Value].Voice = CONFIG.SpeechVoice, "Saved voice restored")
@@ -176,6 +226,7 @@ InspectTestInput(mode)
         else
         {
             Assert(!IsObject(dialog.CategoryList), "Other modes have no category selector")
+            Assert(!IsObject(dialog.SpeedButton), "Other modes have no speed button")
             if mode = "translation"
             {
                 dialog.SelectorList.Choose(2)
@@ -190,7 +241,7 @@ InspectTestInput(mode)
         for size in [{Width: minimumWidth, Height: 200}, {Width: 800, Height: 380}]
         {
             ResizeInputWindow(dialog.Edit, dialog.PinButton, dialog.SelectorList,
-                dialog.CategoryList, dialog.SubmitButton, dialog.CancelButton,
+                dialog.CategoryList, dialog.SpeedButton, dialog.SubmitButton, dialog.CancelButton,
                 dialog.Gui, 0, size.Width, size.Height)
             AssertInputLayout(dialog, size.Width, size.Height)
         }
@@ -212,6 +263,8 @@ AssertInputLayout(dialog, width, height)
         controls.Push(dialog.CategoryList)
     if IsObject(dialog.SelectorList)
         controls.Push(dialog.SelectorList)
+    if IsObject(dialog.SpeedButton)
+        controls.Push(dialog.SpeedButton)
     controls.Push(dialog.SubmitButton, dialog.CancelButton)
     previousRight := 0
     for control in controls
@@ -295,14 +348,20 @@ TestPlaybackQueue()
 {
     global SpeechSession, SpeechBusy, SpeechSynthesisPending, SpeechStartedAt
     global SpeechWorkerRequestPath, TestPlaybackCount, ResultSpeakButton
+    SetSpeechSpeed(1.5)
     StartTestSpeech()
     request := StrSplit(Trim(FileRead(SpeechWorkerRequestPath, "UTF-8")), "`n", "`r")
-    Assert(request.Length = 5, "Worker request protocol")
+    Assert(request.Length = 6, "Worker request protocol")
     Assert(request[1] = Base64EncodeUtf8(SpeechSession.Chunks[1]), "First chunk payload")
+    Assert(request[6] = Base64EncodeUtf8("+50%"), "First chunk uses selected speed")
+    SetSpeechSpeed(2)
+    Assert(SpeechSession.Rate = "+50%", "Active session keeps its starting speed")
     Assert(TestPlaybackCount = 0, "Playback before synthesis")
     CompleteTestChunk()
     firstPath := SpeechSession.PlayingChunk.AudioPath
     Assert(TestPlaybackCount = 1 && SpeechSynthesisPending, "First playback and prefetch")
+    request := StrSplit(Trim(FileRead(SpeechWorkerRequestPath, "UTF-8")), "`n", "`r")
+    Assert(request[6] = Base64EncodeUtf8("+50%"), "Prefetched chunk keeps session speed")
     Assert(SpeechSession.NextIndex = 3, "Exactly one prefetched chunk")
     Assert(A_TickCount - SpeechStartedAt < 1000, "Per-chunk timeout reset")
     CompleteTestChunk()
@@ -319,6 +378,9 @@ TestPlaybackQueue()
     Assert(!SpeechBusy && !IsObject(SpeechSession), "Final playback finishes session")
     Assert(ResultSpeakButton.Text = "朗读", "Button reset")
     Assert(MenuItemState(A_TrayMenu, "停止朗读") & 3, "Stop item disabled after completion")
+    StartTestSpeech(20)
+    Assert(SpeechSession.Rate = "+100%", "Next session uses changed speed")
+    StopSpeech()
 }
 
 TestFailuresAndCancellation()

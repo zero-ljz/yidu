@@ -33,13 +33,15 @@ function Invoke-Mci([string]$command) {
 try {
     # Only fixed test text is submitted. Playback is muted before starting.
     $sample = 'This is a speech segment. The next segment is prepared during playback. '
-    $samples = @(($sample * 2), ($sample * 6))
+    $rates = @('-25%', '+0%', '+25%', '+50%', '+100%')
+    $labels = @('0.75x', '1x', '1.25x', '1.5x', '2x')
     $connection = $null
-    for ($index = 0; $index -lt $samples.Count; $index++) {
+    $previousDuration = 0
+    for ($index = 0; $index -lt $rates.Count; $index++) {
         $audioPath = Join-Path $OutputDirectory ("smoke_$index.mp3")
         $errorPath = Join-Path $OutputDirectory ("smoke_$index.error")
         $donePath = Join-Path $OutputDirectory ("smoke_$index.done")
-        Invoke-EdgeSpeechRequest $samples[$index] 'en-US-JennyNeural' $audioPath $errorPath $donePath
+        Invoke-EdgeSpeechRequest ($sample * 2) 'en-US-JennyNeural' $audioPath $errorPath $donePath $rates[$index]
         if (Test-Path -LiteralPath $errorPath) { throw ([IO.File]::ReadAllText($errorPath)) }
         if (-not (Test-Path -LiteralPath $donePath) -or (Get-Item -LiteralPath $audioPath).Length -eq 0) {
             throw 'Speech worker did not finish with nonempty audio.'
@@ -50,10 +52,16 @@ try {
         }
         $null = Invoke-Mci ('open "' + $audioPath + '" type mpegvideo alias YiDuSpeechSmoke')
         try {
+            $null = Invoke-Mci 'set YiDuSpeechSmoke time format milliseconds'
+            $duration = [int](Invoke-Mci 'status YiDuSpeechSmoke length')
+            if ($duration -le 0 -or ($previousDuration -gt 0 -and $duration -ge $previousDuration)) {
+                throw 'Increasing the speech speed did not shorten the audio.'
+            }
+            $previousDuration = $duration
             $null = Invoke-Mci 'setaudio YiDuSpeechSmoke volume to 0'
             $null = Invoke-Mci 'play YiDuSpeechSmoke'
             if ((Invoke-Mci 'status YiDuSpeechSmoke mode') -ne 'playing') { throw 'Audio did not start playing.' }
-            Write-Output ("PASS: live speech segment {0}, {1} bytes, MCI playback" -f ($index + 1), (Get-Item -LiteralPath $audioPath).Length)
+            Write-Output ("PASS: live speech {0}, {1} ms, {2} bytes, MCI playback" -f $labels[$index], $duration, (Get-Item -LiteralPath $audioPath).Length)
         }
         finally { $null = Invoke-Mci 'close YiDuSpeechSmoke' }
     }

@@ -25,6 +25,7 @@
 - 支持结果复制、窗口置顶和翻译结果朗读
 - 长文本朗读优先按句末或换行分段，首段最多 200 字、后续最多 500 字；首段完成即播放，并提前合成下一段
 - 支持中文普通话、方言、粤语、台湾腔及英语音色
+- 支持 0.75×、1×、1.25×、1.5× 和 2× 朗读速度，并记住上次选择
 - 支持开机自启、管理员模式和托盘菜单设置
 - 支持跟随系统、深色、浅色界面以及可选的窗口半透明效果
 
@@ -99,11 +100,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\run-speech-tests.ps1
 
 朗读输入窗口使用“分类 + 音色”两个联动下拉框，打开时自动定位到上次使用的音色及分类。
 
+音色右侧的倍速按钮依次循环切换 0.75×、1×、1.25×、1.5× 和 2×，与托盘“朗读速度”菜单同步。默认 1×，修改后对下一次朗读生效。
+
 托盘菜单可以切换以下选项：
 
 - 翻译服务
 - 停止朗读（合成或播放期间可用）
 - 朗读音色（按普通话、方言、粤语、台湾和英语分组）
+- 朗读速度
 - 在鼠标指针处显示结果
 - 外观（主题：跟随系统、深色或浅色；窗口半透明）
 - 开机自启
@@ -122,6 +126,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\run-speech-tests.ps1
 Hotkey=^F1
 SpeakHotkey=^F2
 SpeechVoice=zh-CN-XiaoyiNeural
+SpeechSpeed=1
 TranslationService=tencent
 RunAsAdmin=0
 ShowResultAtMouse=1
@@ -136,6 +141,7 @@ OnlineServicesConsent=0
 | `Hotkey` | 翻译快捷键 |
 | `SpeakHotkey` | 朗读快捷键，不能与翻译快捷键相同 |
 | `SpeechVoice` | Microsoft Edge 在线语音的音色标识 |
+| `SpeechSpeed` | 朗读倍速，可选 `0.75`、`1`、`1.25`、`1.5`、`2`，默认 `1` |
 | `TranslationService` | 翻译服务，可选 `tencent`、`youdao` 或 `google` |
 | `RunAsAdmin` | 是否以管理员身份启动，`1` 为开启 |
 | `ShowResultAtMouse` | 是否在鼠标指针附近显示结果，`1` 为开启 |
