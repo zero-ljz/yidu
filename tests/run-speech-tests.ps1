@@ -26,6 +26,13 @@ try {
     $configFunctions = Get-SourceBlock "`nLoadConfig()`n{`n" "`nEnsureConfiguredElevation()`n"
     $voiceFunctions = Get-SourceBlock "`nSetSpeechVoice(voice, *)`n" "`nToggleInputPinned("
     $format = Get-SourceBlock "`nFormatHotkey(hotkey)`n" "`nToggleAutostart(*)`n"
+    $autostartAction = Get-SourceBlock "`nToggleAutostart(*)`n" "`nIsAutostartEnabled()`n"
+    $autostartAction = $autostartAction.Replace('MsgBox(', 'TestSettingsMessage(')
+    $adminAction = Get-SourceBlock "`nToggleRunAsAdmin(*)`n" "`nGetLaunchCommand("
+    $adminAction = $adminAction.Replace('global CONFIG, SettingsTrayMenu', 'global CONFIG, SettingsTrayMenu, TestIsAdmin')
+    $adminAction = $adminAction.Replace('A_IsAdmin', 'TestIsAdmin').Replace('MsgBox(', 'TestSettingsMessage(')
+    $adminAction = $adminAction.Replace('Run(GetLaunchCommand(true), A_ScriptDir)', 'TestAdminRestart()').Replace('ExitApp()', 'TestRestartExit()')
+    $resultPositionAction = Get-SourceBlock "`nToggleResultAtMouse(*)`n" "`nTranslateFromHotkey(*)`n"
     $startup = "`nTestStartup()`n{`n" + (Get-SourceBlock "`nSetupTrayMenu()`nif" "`nSetApplicationIcon()`n{`n") + "`n}`n"
     $inputFunctions = Get-SourceBlock "`nPromptForText(" "`nSetSpeechVoice(voice, *)`n"
     $inputFunctions = $inputFunctions.Replace('A_Clipboard', 'TestInputClipboard')
@@ -51,7 +58,8 @@ try {
     $testPath = Join-Path $testDirectory 'speech-tests.ahk'
     [IO.File]::WriteAllText($testPath, "#Requires AutoHotkey v2.0`n#Warn All, StdOut`n" +
         $settings + $menuGlobals + $globals + $tests + $speech + $worker + $tray +
-        $configFunctions + $voiceFunctions + $format + $startup + $inputFunctions +
+        $configFunctions + $voiceFunctions + $format + $autostartAction + $adminAction +
+        $resultPositionAction + $startup + $inputFunctions +
         $inputEvents + $speakText + $translationStart + $translationEvents + $hideResult +
         $resultCreate + $resultCommands + $resultResize +
         $windowRect + $appearance + $dropDownTheme + $redraw, [Text.UTF8Encoding]::new($true))

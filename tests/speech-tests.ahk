@@ -8,6 +8,11 @@ global ResultPinned := false
 global TestDirectory := A_Args[1]
 global CONFIG_DIRECTORY := TestDirectory
 global CONFIG_PATH := TestDirectory . "\YiDu.ini"
+global AUTOSTART_SHORTCUT := TestDirectory . "\test-autostart.lnk"
+global TestPackagedAutostart := false
+global TestIsAdmin := true
+global TestSettingsErrors := []
+global TestHelpCalls := []
 global IS_PACKAGED := false
 global ShowResultAtMouse := true
 global TestPlaybackMode := "stopped"
@@ -44,6 +49,8 @@ try
 {
     TestTraySettings()
     FileAppend("PASS: tray menus, saved settings and quiet startup`n", "*")
+    TestTrayOrganization()
+    FileAppend("PASS: menu organization, nested settings callbacks and packaged menu`n", "*")
     TestInputWindows()
     FileAppend("PASS: linked voice selectors, saved selection and input layout`n", "*")
     TestInputDrafts()
@@ -103,7 +110,7 @@ MenuItemState(menu, label)
 TestTraySettings()
 {
     global CONFIG, CONFIG_PATH, SPEECH_VOICES, SpeechVoiceTrayMenu, SpeechVoiceTrayMenus
-    global AppearanceTrayMenu, ColorThemeTrayMenu, TestAppearanceUpdates
+    global SettingsTrayMenu, ColorThemeTrayMenu, TestAppearanceUpdates
     global TestFirstRunCount, TestNotifications
     global SPEECH_SPEEDS, SpeechSpeedTrayMenu
     Assert(!CONFIG.WindowTransparency, "New default transparency")
@@ -135,7 +142,7 @@ TestTraySettings()
     Assert(MenuItemState(A_TrayMenu, "停止朗读") & 3, "Idle stop item disabled")
     Assert(MenuItemState(A_TrayMenu, "暂停朗读") & 3, "Idle pause item disabled")
     Assert(MenuItemPosition(A_TrayMenu, "语音角色") = -1, "Old voice menu removed")
-    Assert(MenuItemPosition(A_TrayMenu, "窗口半透明") = -1, "Transparency moved into appearance")
+    Assert(MenuItemPosition(A_TrayMenu, "窗口半透明") = -1, "Transparency belongs to settings")
     Assert(MenuItemPosition(A_TrayMenu, "朗读音色") >= 0, "Voice root menu")
     Assert(MenuItemPosition(A_TrayMenu, "朗读速度") >= 0, "Speed root menu")
     for item in SPEECH_SPEEDS
@@ -153,9 +160,9 @@ TestTraySettings()
     SetColorTheme("light")
     Assert(MenuItemState(ColorThemeTrayMenu, "浅色") & 8, "Theme selection checked")
     Assert(!(MenuItemState(ColorThemeTrayMenu, "深色") & 8), "Previous theme unchecked")
-    Assert(MenuItemState(AppearanceTrayMenu, "窗口半透明") & 8, "Saved transparency checked")
+    Assert(MenuItemState(SettingsTrayMenu, "窗口半透明") & 8, "Saved transparency checked")
     ToggleWindowTransparency()
-    Assert(!CONFIG.WindowTransparency && !(MenuItemState(AppearanceTrayMenu, "窗口半透明") & 8), "Transparency toggle")
+    Assert(!CONFIG.WindowTransparency && !(MenuItemState(SettingsTrayMenu, "窗口半透明") & 8), "Transparency toggle")
     Assert(IniRead(CONFIG_PATH, "Settings", "WindowTransparency") = "0", "Transparency persisted")
     Assert(TestAppearanceUpdates = 2, "Appearance applied to open windows")
     CONFIG.PrivacyChoiceMade := false
@@ -167,6 +174,113 @@ TestTraySettings()
     CONFIG.PrivacyChoiceMade := true
     TestStartup()
     Assert(TestFirstRunCount = 1 && TestNotifications.Length = 0, "Later startup remains quiet")
+}
+
+AssertTrayOrganization()
+{
+    global CONFIG, IS_PACKAGED, SettingsTrayMenu, HelpTrayMenu, ColorThemeTrayMenu
+    labels := ["翻译`t" . FormatHotkey(CONFIG.Hotkey), "朗读`t" . FormatHotkey(CONFIG.SpeakHotkey),
+        "暂停朗读", "停止朗读", "", "翻译服务", "朗读音色", "朗读速度", "", "设置", "帮助", "", "退出"]
+    Assert(DllCall("GetMenuItemCount", "Ptr", A_TrayMenu.Handle, "Int") = labels.Length, "Compact root menu")
+    for index, label in labels
+    {
+        if label != ""
+            Assert(MenuItemPosition(A_TrayMenu, label) = index - 1, "Root item order: " . label)
+        else
+            Assert(DllCall("GetMenuState", "Ptr", A_TrayMenu.Handle, "UInt", index - 1,
+                "UInt", 0x400, "UInt") & 0x800, "Root separator placement")
+    }
+    Assert(DllCall("GetSubMenu", "Ptr", A_TrayMenu.Handle, "Int", 9, "Ptr") = SettingsTrayMenu.Handle, "Settings submenu attached")
+    Assert(DllCall("GetSubMenu", "Ptr", A_TrayMenu.Handle, "Int", 10, "Ptr") = HelpTrayMenu.Handle, "Help submenu attached")
+    Assert(MenuItemPosition(SettingsTrayMenu, "外观") = -1, "Appearance submenu removed")
+    Assert(MenuItemPosition(SettingsTrayMenu, "主题") = 0
+        && DllCall("GetSubMenu", "Ptr", SettingsTrayMenu.Handle, "Int", 0, "Ptr") = ColorThemeTrayMenu.Handle, "Theme directly under settings")
+    Assert(MenuItemPosition(SettingsTrayMenu, "窗口半透明") = 1, "Transparency directly under settings")
+    Assert(MenuItemPosition(SettingsTrayMenu, "结果显示在鼠标旁") = 2, "Result position belongs to settings")
+    Assert(MenuItemPosition(SettingsTrayMenu, "开机自启") = 4, "Autostart belongs to settings")
+    Assert(MenuItemPosition(SettingsTrayMenu, "以管理员身份启动") = (IS_PACKAGED ? -1 : 5), "Administrator option only in unpackaged menu")
+    for index, label in ["打开数据目录", "在线服务与隐私", "关于译读"]
+        Assert(MenuItemPosition(HelpTrayMenu, label) = index - 1, "Help item order: " . label)
+    for label in ["外观", "结果显示在鼠标旁", "在鼠标指针处显示结果", "开机自启", "以管理员身份启动", "打开数据目录", "在线服务与隐私", "关于译读"]
+        Assert(MenuItemPosition(A_TrayMenu, label) = -1, "Low-frequency option removed from root: " . label)
+    Assert(A_TrayMenu.Default = labels[1] && A_TrayMenu.ClickCount = 1, "Default tray action remains translate")
+}
+
+DispatchSettingsCommand(menu, label)
+{
+    commandId := DllCall("GetMenuItemID", "Ptr", menu.Handle, "Int", MenuItemPosition(menu, label), "UInt")
+    PostMessage(0x0111, commandId, 0, , "ahk_id " . A_ScriptHwnd)
+    Critical "Off"
+    Sleep(30)
+    Critical
+}
+
+TestTrayOrganization()
+{
+    global CONFIG, CONFIG_PATH, IS_PACKAGED, SettingsTrayMenu, HelpTrayMenu, ShowResultAtMouse
+    global ColorThemeTrayMenu
+    global TestIsAdmin, TestSettingsErrors, TestHelpCalls
+    AssertTrayOrganization()
+    for expected in [true, false]
+    {
+        DispatchSettingsCommand(SettingsTrayMenu, "窗口半透明")
+        Assert(CONFIG.WindowTransparency = expected
+            && !!(MenuItemState(SettingsTrayMenu, "窗口半透明") & 8) = expected, "Transparency callback updates settings check")
+        Assert(IniRead(CONFIG_PATH, "Settings", "WindowTransparency") + 0 = expected, "Transparency preference persisted")
+        SetupTrayMenu()
+        Assert(!!(MenuItemState(SettingsTrayMenu, "窗口半透明") & 8) = expected, "Rebuilt settings restores transparency check")
+    }
+    for item in [{Label: "跟随系统", Theme: "system"}, {Label: "浅色", Theme: "light"}]
+    {
+        DispatchSettingsCommand(ColorThemeTrayMenu, item.Label)
+        Assert(CONFIG.ColorTheme = item.Theme && (MenuItemState(ColorThemeTrayMenu, item.Label) & 8), "Theme callback remains accessible")
+        Assert(IniRead(CONFIG_PATH, "Settings", "ColorTheme") = item.Theme, "Theme preference persisted")
+    }
+    Assert(MenuItemState(SettingsTrayMenu, "结果显示在鼠标旁") & 8, "Saved result position checked")
+    for expected in [false, true]
+    {
+        DispatchSettingsCommand(SettingsTrayMenu, "结果显示在鼠标旁")
+        Assert(ShowResultAtMouse = expected && CONFIG.ShowResultAtMouse = expected
+            && !!(MenuItemState(SettingsTrayMenu, "结果显示在鼠标旁") & 8) = expected, "Result position callback updates nested check")
+        Assert(IniRead(CONFIG_PATH, "Settings", "ShowResultAtMouse") + 0 = expected, "Result position persisted")
+    }
+    for expected in [true, false]
+    {
+        DispatchSettingsCommand(SettingsTrayMenu, "开机自启")
+        Assert(IsAutostartEnabled() = expected && !!(MenuItemState(SettingsTrayMenu, "开机自启") & 8) = expected, "Unpackaged autostart callback updates nested check")
+        DispatchSettingsCommand(SettingsTrayMenu, "以管理员身份启动")
+        Assert(CONFIG.RunAsAdmin = expected && !!(MenuItemState(SettingsTrayMenu, "以管理员身份启动") & 8) = expected, "Admin callback updates nested check")
+        Assert(IniRead(CONFIG_PATH, "Settings", "RunAsAdmin") + 0 = expected, "Admin preference persisted")
+    }
+    Assert(TestSettingsErrors.Length = 0, "Nested callbacks succeed")
+    TestIsAdmin := false
+    DispatchSettingsCommand(SettingsTrayMenu, "以管理员身份启动")
+    Assert(!CONFIG.RunAsAdmin && !(MenuItemState(SettingsTrayMenu, "以管理员身份启动") & 8)
+        && TestSettingsErrors.Length = 1, "Failed admin restart resets nested check")
+    TestIsAdmin := true
+    TestSettingsErrors := []
+    for label in ["在线服务与隐私", "关于译读"]
+        DispatchSettingsCommand(HelpTrayMenu, label)
+    Assert(TestHelpCalls.Length = 2 && TestHelpCalls[1] = "privacy" && TestHelpCalls[2] = "about", "Help callbacks remain accessible")
+
+    IS_PACKAGED := true
+    try
+    {
+        SetupTrayMenu()
+        AssertTrayOrganization()
+        for expected in [true, false]
+        {
+            DispatchSettingsCommand(SettingsTrayMenu, "开机自启")
+            Assert(IsAutostartEnabled() = expected && !!(MenuItemState(SettingsTrayMenu, "开机自启") & 8) = expected, "Packaged autostart callback updates nested check")
+            SetupTrayMenu()
+            Assert(!!(MenuItemState(SettingsTrayMenu, "开机自启") & 8) = expected, "Rebuilt menu restores packaged autostart check")
+        }
+    }
+    finally
+    {
+        IS_PACKAGED := false
+        SetupTrayMenu()
+    }
 }
 
 TestInputWindows()
@@ -1144,29 +1258,58 @@ SpeakFromTray(*)
 {
 }
 
-ToggleResultAtMouse(*)
-{
-}
-
-ToggleAutostart(*)
-{
-}
-
-ToggleRunAsAdmin(*)
-{
-}
-
 IsAutostartEnabled()
 {
-    return false
+    global AUTOSTART_SHORTCUT, IS_PACKAGED, TestPackagedAutostart
+    return IS_PACKAGED ? TestPackagedAutostart : FileExist(AUTOSTART_SHORTCUT) != ""
+}
+
+CreateAutostartShortcut()
+{
+    global AUTOSTART_SHORTCUT
+    FileAppend("test", AUTOSTART_SHORTCUT)
+}
+
+SetPackagedAutostart(enabled)
+{
+    global TestPackagedAutostart
+    TestPackagedAutostart := enabled
+}
+
+TestSettingsMessage(message, *)
+{
+    global TestSettingsErrors
+    TestSettingsErrors.Push(message)
+}
+
+TestAdminRestart()
+{
+    throw Error("Synthetic admin restart failure")
+}
+
+TestRestartExit()
+{
+    throw Error("Unexpected test process restart")
+}
+
+PositionResultWindowAtMouse()
+{
+}
+
+MoveWindowPhysical(*)
+{
 }
 
 ShowOnlineServicesPrivacyDialog(*)
 {
+    global TestHelpCalls
+    TestHelpCalls.Push("privacy")
 }
 
 ShowAboutDialog(*)
 {
+    global TestHelpCalls
+    TestHelpCalls.Push("about")
 }
 
 OpenOnlineServicesPrivacyDialog(firstRun)

@@ -4,12 +4,12 @@
 ;@Ahk2Exe-SetCompanyName zero-ljz（空心）
 ;@Ahk2Exe-SetDescription 译读
 ;@Ahk2Exe-SetCopyright Copyright (c) 2026 zero-ljz
-;@Ahk2Exe-SetVersion 1.2.0.0
+;@Ahk2Exe-SetVersion 1.3.0.0
 
 SendMode "Input"
 CoordMode "Mouse", "Screen"
 
-global APP_VERSION := "1.2.0"
+global APP_VERSION := "1.3.0"
 global CONFIG := {
     Hotkey: "^F1",
     SpeakHotkey: "^F2",
@@ -92,7 +92,8 @@ global SpeechVoiceTrayMenu := 0
 global SpeechVoiceTrayMenus := Map()
 global SpeechSpeedTrayMenu := 0
 global ColorThemeTrayMenu := 0
-global AppearanceTrayMenu := 0
+global SettingsTrayMenu := 0
+global HelpTrayMenu := 0
 global SpeechAudioPath := ""
 global SpeechErrorPath := ""
 global SpeechDonePath := ""
@@ -510,9 +511,10 @@ SetupTrayMenu()
     global CONFIG, IS_PACKAGED, ShowResultAtMouse
     global TRANSLATION_SERVICES, SPEECH_VOICES, SPEECH_VOICE_GROUPS
     global TranslationServiceTrayMenu, SpeechVoiceTrayMenu, ColorThemeTrayMenu
-    global SpeechVoiceTrayMenus, AppearanceTrayMenu, SpeechTrayMenuReady
+    global SpeechVoiceTrayMenus, SpeechTrayMenuReady
     global SPEECH_SPEEDS, SpeechSpeedTrayMenu
     global SpeechPauseMenuLabel
+    global SettingsTrayMenu, HelpTrayMenu
 
     A_TrayMenu.Delete()
     translateHotkeyText := FormatHotkey(CONFIG.Hotkey)
@@ -561,42 +563,39 @@ SetupTrayMenu()
         SpeechSpeedTrayMenu.Add(item.Label, SetSpeechSpeed.Bind(item.Value))
     UpdateSpeechSpeedControls()
     A_TrayMenu.Add("朗读速度", SpeechSpeedTrayMenu)
-    A_TrayMenu.Add("在鼠标指针处显示结果", ToggleResultAtMouse)
-
-    if ShowResultAtMouse
-        A_TrayMenu.Check("在鼠标指针处显示结果")
 
     ColorThemeTrayMenu := Menu()
     ColorThemeTrayMenu.Add("跟随系统", SetColorTheme.Bind("system"))
     ColorThemeTrayMenu.Add("深色", SetColorTheme.Bind("dark"))
     ColorThemeTrayMenu.Add("浅色", SetColorTheme.Bind("light"))
     UpdateColorThemeTrayChecks()
-    AppearanceTrayMenu := Menu()
-    AppearanceTrayMenu.Add("主题", ColorThemeTrayMenu)
-    AppearanceTrayMenu.Add()
-    AppearanceTrayMenu.Add("窗口半透明", ToggleWindowTransparency)
-
+    SettingsTrayMenu := Menu()
+    SettingsTrayMenu.Add("主题", ColorThemeTrayMenu)
+    SettingsTrayMenu.Add("窗口半透明", ToggleWindowTransparency)
     if CONFIG.WindowTransparency
-        AppearanceTrayMenu.Check("窗口半透明")
-
-    A_TrayMenu.Add("外观", AppearanceTrayMenu)
-
-    A_TrayMenu.Add()
-    A_TrayMenu.Add("开机自启", ToggleAutostart)
+        SettingsTrayMenu.Check("窗口半透明")
+    SettingsTrayMenu.Add("结果显示在鼠标旁", ToggleResultAtMouse)
+    if ShowResultAtMouse
+        SettingsTrayMenu.Check("结果显示在鼠标旁")
+    SettingsTrayMenu.Add()
+    SettingsTrayMenu.Add("开机自启", ToggleAutostart)
 
     if !IS_PACKAGED
-        A_TrayMenu.Add("以管理员身份启动", ToggleRunAsAdmin)
+        SettingsTrayMenu.Add("以管理员身份启动", ToggleRunAsAdmin)
 
     if IsAutostartEnabled()
-        A_TrayMenu.Check("开机自启")
+        SettingsTrayMenu.Check("开机自启")
 
     if !IS_PACKAGED && CONFIG.RunAsAdmin
-        A_TrayMenu.Check("以管理员身份启动")
+        SettingsTrayMenu.Check("以管理员身份启动")
 
+    HelpTrayMenu := Menu()
+    HelpTrayMenu.Add("打开数据目录", OpenDataDirectory)
+    HelpTrayMenu.Add("在线服务与隐私", ShowOnlineServicesPrivacyDialog)
+    HelpTrayMenu.Add("关于译读", ShowAboutDialog)
     A_TrayMenu.Add()
-    A_TrayMenu.Add("打开数据目录", OpenDataDirectory)
-    A_TrayMenu.Add("在线服务与隐私", ShowOnlineServicesPrivacyDialog)
-    A_TrayMenu.Add("关于译读", ShowAboutDialog)
+    A_TrayMenu.Add("设置", SettingsTrayMenu)
+    A_TrayMenu.Add("帮助", HelpTrayMenu)
     A_TrayMenu.Add()
     A_TrayMenu.Add("退出", (*) => ExitApp())
     A_TrayMenu.Default := translateMenuText
@@ -714,7 +713,7 @@ UpdateColorThemeTrayChecks()
 
 ToggleWindowTransparency(*)
 {
-    global CONFIG, AppearanceTrayMenu
+    global CONFIG, SettingsTrayMenu
 
     CONFIG.WindowTransparency := !CONFIG.WindowTransparency
     WriteConfigSetting(
@@ -723,9 +722,9 @@ ToggleWindowTransparency(*)
     )
 
     if CONFIG.WindowTransparency
-        AppearanceTrayMenu.Check("窗口半透明")
+        SettingsTrayMenu.Check("窗口半透明")
     else
-        AppearanceTrayMenu.Uncheck("窗口半透明")
+        SettingsTrayMenu.Uncheck("窗口半透明")
 
     ApplyAppearanceToOpenWindows()
 }
@@ -1246,7 +1245,7 @@ FormatHotkeyKey(key)
 
 ToggleAutostart(*)
 {
-    global AUTOSTART_SHORTCUT, IS_PACKAGED
+    global AUTOSTART_SHORTCUT, IS_PACKAGED, SettingsTrayMenu
 
     try
     {
@@ -1257,7 +1256,7 @@ ToggleAutostart(*)
             else
                 FileDelete(AUTOSTART_SHORTCUT)
 
-            A_TrayMenu.Uncheck("开机自启")
+            SettingsTrayMenu.Uncheck("开机自启")
         }
         else
         {
@@ -1266,7 +1265,7 @@ ToggleAutostart(*)
             else
                 CreateAutostartShortcut()
 
-            A_TrayMenu.Check("开机自启")
+            SettingsTrayMenu.Check("开机自启")
         }
     }
     catch Error as err
@@ -1354,7 +1353,7 @@ CreateAutostartShortcut()
 
 ToggleRunAsAdmin(*)
 {
-    global CONFIG
+    global CONFIG, SettingsTrayMenu
 
     newValue := !CONFIG.RunAsAdmin
 
@@ -1369,11 +1368,11 @@ ToggleRunAsAdmin(*)
 
     if !CONFIG.RunAsAdmin
     {
-        A_TrayMenu.Uncheck("以管理员身份启动")
+        SettingsTrayMenu.Uncheck("以管理员身份启动")
         return
     }
 
-    A_TrayMenu.Check("以管理员身份启动")
+    SettingsTrayMenu.Check("以管理员身份启动")
 
     if A_IsAdmin
         return
@@ -1387,7 +1386,7 @@ ToggleRunAsAdmin(*)
     {
         CONFIG.RunAsAdmin := false
         try WriteConfigSetting("RunAsAdmin", 0)
-        A_TrayMenu.Uncheck("以管理员身份启动")
+        SettingsTrayMenu.Uncheck("以管理员身份启动")
         MsgBox(
             "未能以管理员身份重新启动，已撤销该设置：`n" . err.Message,
             "译读",
@@ -1420,15 +1419,16 @@ QuoteCommandArgument(value)
 ToggleResultAtMouse(*)
 {
     global CONFIG, ResultGui, ShowResultAtMouse, ResultManualPosition
+    global SettingsTrayMenu
 
-    menuText := "在鼠标指针处显示结果"
+    menuText := "结果显示在鼠标旁"
     ShowResultAtMouse := !ShowResultAtMouse
     CONFIG.ShowResultAtMouse := ShowResultAtMouse
     WriteConfigSetting("ShowResultAtMouse", ShowResultAtMouse ? 1 : 0)
 
     if ShowResultAtMouse
     {
-        A_TrayMenu.Check(menuText)
+        SettingsTrayMenu.Check(menuText)
 
         if IsObject(ResultGui)
         {
@@ -1447,7 +1447,7 @@ ToggleResultAtMouse(*)
     }
     else
     {
-        A_TrayMenu.Uncheck(menuText)
+        SettingsTrayMenu.Uncheck(menuText)
 
         if IsObject(ResultGui) && IsObject(ResultManualPosition)
         {
