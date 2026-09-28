@@ -52,7 +52,7 @@ try
     TestTrayOrganization()
     FileAppend("PASS: menu organization, nested settings callbacks and packaged menu`n", "*")
     TestInputWindows()
-    FileAppend("PASS: linked voice selectors, saved selection and input layout`n", "*")
+    FileAppend("PASS: flat voice selector, saved selection and input layout`n", "*")
     TestInputDrafts()
     FileAppend("PASS: input drafts, selection restoration and explicit dismissal`n", "*")
     TestVoiceInputPlayback()
@@ -109,7 +109,7 @@ MenuItemState(menu, label)
 
 TestTraySettings()
 {
-    global CONFIG, CONFIG_PATH, SPEECH_VOICES, SpeechVoiceTrayMenu, SpeechVoiceTrayMenus
+    global CONFIG, CONFIG_PATH, SPEECH_VOICES, SpeechVoiceTrayMenu
     global SettingsTrayMenu, ColorThemeTrayMenu, TestAppearanceUpdates
     global TestFirstRunCount, TestNotifications
     global SPEECH_SPEEDS, SpeechSpeedTrayMenu
@@ -147,14 +147,21 @@ TestTraySettings()
     Assert(MenuItemPosition(A_TrayMenu, "朗读速度") >= 0, "Speed root menu")
     for item in SPEECH_SPEEDS
         Assert(!!(MenuItemState(SpeechSpeedTrayMenu, item.Label) & 8) = (item.Value = CONFIG.SpeechSpeed), "Speed menu selection")
-    Assert(SpeechVoiceTrayMenus.Count = 5, "Five voice groups")
-    for item in SPEECH_VOICES
-        Assert(MenuItemPosition(SpeechVoiceTrayMenus[item.Group], item.Label) >= 0, "Voice assigned to group")
-    Assert(MenuItemState(SpeechVoiceTrayMenu, "粤语") & 8, "Saved voice group checked")
+    Assert(DllCall("GetMenuItemCount", "Ptr", SpeechVoiceTrayMenu.Handle, "Int") = SPEECH_VOICES.Length, "Flat voice menu contains all voices")
+    for index, item in SPEECH_VOICES
+    {
+        Assert(MenuItemPosition(SpeechVoiceTrayMenu, item.Label) = index - 1, "Flat voice menu order")
+        Assert(!DllCall("GetSubMenu", "Ptr", SpeechVoiceTrayMenu.Handle, "Int", index - 1, "Ptr"), "Voice item has no category submenu")
+    }
+    Assert(MenuItemState(SpeechVoiceTrayMenu, "晓佳 HiuGaai · 粤语") & 8, "Saved voice checked")
     SetSpeechVoice("en-US-GuyNeural")
-    Assert(!(MenuItemState(SpeechVoiceTrayMenu, "粤语") & 8), "Old group unchecked")
-    Assert(MenuItemState(SpeechVoiceTrayMenu, "英语") & 8, "New group checked")
-    Assert(MenuItemState(SpeechVoiceTrayMenus["英语"], "Guy · 英语男声") & 8, "New voice checked")
+    Assert(!(MenuItemState(SpeechVoiceTrayMenu, "晓佳 HiuGaai · 粤语") & 8), "Old voice unchecked")
+    Assert(MenuItemState(SpeechVoiceTrayMenu, "Guy · 英语男声") & 8, "New voice checked")
+    for index, item in SPEECH_VOICES
+    {
+        DispatchSettingsCommand(SpeechVoiceTrayMenu, item.Label)
+        Assert(CONFIG.SpeechVoice = item.Voice && (MenuItemState(SpeechVoiceTrayMenu, item.Label) & 8), "Flat voice menu callback selects voice")
+    }
     Assert(IniRead(CONFIG_PATH, "Settings", "SpeechVoice") = "en-US-GuyNeural", "Voice choice persisted")
     Assert(MenuItemState(ColorThemeTrayMenu, "深色") & 8, "Saved theme checked")
     SetColorTheme("light")
@@ -178,9 +185,10 @@ TestTraySettings()
 
 AssertTrayOrganization()
 {
-    global CONFIG, IS_PACKAGED, SettingsTrayMenu, HelpTrayMenu, ColorThemeTrayMenu
+    global CONFIG, IS_PACKAGED, SettingsTrayMenu, ColorThemeTrayMenu
     labels := ["翻译`t" . FormatHotkey(CONFIG.Hotkey), "朗读`t" . FormatHotkey(CONFIG.SpeakHotkey),
-        "暂停朗读", "停止朗读", "", "翻译服务", "朗读音色", "朗读速度", "", "设置", "帮助", "", "退出"]
+        "暂停朗读", "停止朗读", "", "翻译服务", "朗读音色", "朗读速度", "", "设置",
+        "打开数据目录", "在线服务与隐私", "关于译读", "", "退出"]
     Assert(DllCall("GetMenuItemCount", "Ptr", A_TrayMenu.Handle, "Int") = labels.Length, "Compact root menu")
     for index, label in labels
     {
@@ -191,17 +199,20 @@ AssertTrayOrganization()
                 "UInt", 0x400, "UInt") & 0x800, "Root separator placement")
     }
     Assert(DllCall("GetSubMenu", "Ptr", A_TrayMenu.Handle, "Int", 9, "Ptr") = SettingsTrayMenu.Handle, "Settings submenu attached")
-    Assert(DllCall("GetSubMenu", "Ptr", A_TrayMenu.Handle, "Int", 10, "Ptr") = HelpTrayMenu.Handle, "Help submenu attached")
     Assert(MenuItemPosition(SettingsTrayMenu, "外观") = -1, "Appearance submenu removed")
     Assert(MenuItemPosition(SettingsTrayMenu, "主题") = 0
         && DllCall("GetSubMenu", "Ptr", SettingsTrayMenu.Handle, "Int", 0, "Ptr") = ColorThemeTrayMenu.Handle, "Theme directly under settings")
     Assert(MenuItemPosition(SettingsTrayMenu, "窗口半透明") = 1, "Transparency directly under settings")
-    Assert(MenuItemPosition(SettingsTrayMenu, "结果显示在鼠标旁") = 2, "Result position belongs to settings")
+    Assert(MenuItemPosition(SettingsTrayMenu, "翻译结果显示在鼠标旁") = 2, "Translation result position belongs to settings")
+    Assert(MenuItemPosition(SettingsTrayMenu, "结果显示在鼠标旁") = -1, "Old result position label removed")
     Assert(MenuItemPosition(SettingsTrayMenu, "开机自启") = 4, "Autostart belongs to settings")
     Assert(MenuItemPosition(SettingsTrayMenu, "以管理员身份启动") = (IS_PACKAGED ? -1 : 5), "Administrator option only in unpackaged menu")
     for index, label in ["打开数据目录", "在线服务与隐私", "关于译读"]
-        Assert(MenuItemPosition(HelpTrayMenu, label) = index - 1, "Help item order: " . label)
-    for label in ["外观", "结果显示在鼠标旁", "在鼠标指针处显示结果", "开机自启", "以管理员身份启动", "打开数据目录", "在线服务与隐私", "关于译读"]
+    {
+        Assert(MenuItemPosition(A_TrayMenu, label) = index + 9, "Former help item at root: " . label)
+        Assert(!DllCall("GetSubMenu", "Ptr", A_TrayMenu.Handle, "Int", index + 9, "Ptr"), "Former help item is a direct command")
+    }
+    for label in ["外观", "翻译结果显示在鼠标旁", "结果显示在鼠标旁", "在鼠标指针处显示结果", "开机自启", "以管理员身份启动", "帮助"]
         Assert(MenuItemPosition(A_TrayMenu, label) = -1, "Low-frequency option removed from root: " . label)
     Assert(A_TrayMenu.Default = labels[1] && A_TrayMenu.ClickCount = 1, "Default tray action remains translate")
 }
@@ -217,7 +228,7 @@ DispatchSettingsCommand(menu, label)
 
 TestTrayOrganization()
 {
-    global CONFIG, CONFIG_PATH, IS_PACKAGED, SettingsTrayMenu, HelpTrayMenu, ShowResultAtMouse
+    global CONFIG, CONFIG_PATH, IS_PACKAGED, SettingsTrayMenu, ShowResultAtMouse
     global ColorThemeTrayMenu
     global TestIsAdmin, TestSettingsErrors, TestHelpCalls
     AssertTrayOrganization()
@@ -236,12 +247,12 @@ TestTrayOrganization()
         Assert(CONFIG.ColorTheme = item.Theme && (MenuItemState(ColorThemeTrayMenu, item.Label) & 8), "Theme callback remains accessible")
         Assert(IniRead(CONFIG_PATH, "Settings", "ColorTheme") = item.Theme, "Theme preference persisted")
     }
-    Assert(MenuItemState(SettingsTrayMenu, "结果显示在鼠标旁") & 8, "Saved result position checked")
+    Assert(MenuItemState(SettingsTrayMenu, "翻译结果显示在鼠标旁") & 8, "Saved result position checked")
     for expected in [false, true]
     {
-        DispatchSettingsCommand(SettingsTrayMenu, "结果显示在鼠标旁")
+        DispatchSettingsCommand(SettingsTrayMenu, "翻译结果显示在鼠标旁")
         Assert(ShowResultAtMouse = expected && CONFIG.ShowResultAtMouse = expected
-            && !!(MenuItemState(SettingsTrayMenu, "结果显示在鼠标旁") & 8) = expected, "Result position callback updates nested check")
+            && !!(MenuItemState(SettingsTrayMenu, "翻译结果显示在鼠标旁") & 8) = expected, "Result position callback updates nested check")
         Assert(IniRead(CONFIG_PATH, "Settings", "ShowResultAtMouse") + 0 = expected, "Result position persisted")
     }
     for expected in [true, false]
@@ -260,8 +271,8 @@ TestTrayOrganization()
     TestIsAdmin := true
     TestSettingsErrors := []
     for label in ["在线服务与隐私", "关于译读"]
-        DispatchSettingsCommand(HelpTrayMenu, label)
-    Assert(TestHelpCalls.Length = 2 && TestHelpCalls[1] = "privacy" && TestHelpCalls[2] = "about", "Help callbacks remain accessible")
+        DispatchSettingsCommand(A_TrayMenu, label)
+    Assert(TestHelpCalls.Length = 2 && TestHelpCalls[1] = "privacy" && TestHelpCalls[2] = "about", "Root privacy and about callbacks remain accessible")
 
     IS_PACKAGED := true
     try
@@ -301,7 +312,7 @@ TestInputWindows()
 
 InspectTestInput(mode)
 {
-    global ActiveInputDialog, CONFIG, CONFIG_PATH, SPEECH_VOICES, SPEECH_VOICE_GROUPS
+    global ActiveInputDialog, CONFIG, CONFIG_PATH, SPEECH_VOICES
     global TestInputError, TestTooltipHwnd, SPEECH_SPEEDS, SpeechSpeedTrayMenu
     global TestDraftScenario, TestVoiceScenario
     Critical
@@ -325,11 +336,12 @@ InspectTestInput(mode)
     {
         dialog := ActiveInputDialog
         Assert(IsObject(dialog), "Input window initialized")
+        Assert(!dialog.HasOwnProp("CategoryList"), "Input window has no category selector")
         if mode = "voice"
         {
             Assert(dialog.SpeedButton.Text = GetSpeechSpeedLabel(), "Saved speed restored on button")
             dialog.SelectorList.GetPos(, , &voiceWidth)
-            Assert(voiceWidth = 150, "Voice selector narrowed")
+            Assert(voiceWidth = 220, "Full voice selector width restored")
             Assert(IsObject(dialog.SpeedTooltip), "Native speed tooltip created")
             TestTooltipHwnd := dialog.SpeedTooltip.Hwnd
             Assert(DllCall("IsWindow", "Ptr", TestTooltipHwnd), "Tooltip window is alive")
@@ -358,28 +370,19 @@ InspectTestInput(mode)
             Critical
             Assert(CONFIG.SpeechSpeed = 2 && dialog.SpeedButton.Text = "2×", "Tray speed syncs input button")
             savedIndex := GetSpeechVoiceIndex(CONFIG.SpeechVoice)
-            Assert(dialog.CategoryList.Text = SPEECH_VOICES[savedIndex].Group, "Saved category restored")
-            Assert(dialog.State.VoiceOptions[dialog.SelectorList.Value].Voice = CONFIG.SpeechVoice, "Saved voice restored")
-            for group in SPEECH_VOICE_GROUPS
+            Assert(dialog.SelectorList.Value = savedIndex, "Saved voice restored")
+            count := SendMessage(0x0146, , , , "ahk_id " . dialog.SelectorList.Hwnd)
+            Assert(count = SPEECH_VOICES.Length, "Flat selector contains all voices")
+            for index, item in SPEECH_VOICES
             {
-                dialog.CategoryList.Choose(group)
-                ChangeSpeechVoiceGroup(dialog.State, dialog.SelectorList, dialog.CategoryList)
-                Assert(dialog.State.VoiceOptions.Length > 0, "Category has voices")
-                count := SendMessage(0x0146, , , , "ahk_id " . dialog.SelectorList.Hwnd)
-                Assert(count = dialog.State.VoiceOptions.Length, "Filtered list count")
-                for index, item in dialog.State.VoiceOptions
-                {
-                    Assert(item.Group = group, "Only selected category voices shown")
-                    dialog.SelectorList.Choose(index)
-                    ChangeSpeechVoice(dialog.State, dialog.SelectorList)
-                    Assert(CONFIG.SpeechVoice = item.Voice, "Filtered selection maps to correct voice")
-                    Assert(IniRead(CONFIG_PATH, "Settings", "SpeechVoice") = item.Voice, "Filtered choice persisted")
-                }
+                dialog.SelectorList.Choose(index)
+                ChangeSpeechVoice(dialog.SelectorList)
+                Assert(CONFIG.SpeechVoice = item.Voice, "Flat selection maps to correct voice")
+                Assert(IniRead(CONFIG_PATH, "Settings", "SpeechVoice") = item.Voice, "Voice choice persisted")
             }
         }
         else
         {
-            Assert(!IsObject(dialog.CategoryList), "Other modes have no category selector")
             Assert(!IsObject(dialog.SpeedButton), "Other modes have no speed button")
             if mode = "translation"
             {
@@ -391,13 +394,29 @@ InspectTestInput(mode)
                 Assert(!IsObject(dialog.SelectorList), "Plain input has no selectors")
         }
 
-        minimumWidth := mode = "voice" ? 560 : (mode = "translation" ? 300 : 360)
+        minimumWidth := mode = "voice" ? 524 : (mode = "translation" ? 300 : 360)
+        if mode = "voice"
+        {
+            minMaxInfo := Buffer(40, 0)
+            SendMessage(0x0024, 0, minMaxInfo.Ptr, , "ahk_id " . dialog.Gui.Hwnd)
+            GetPhysicalWindowRect(dialog.Gui.Hwnd, , , &windowWidth)
+            DllCall("GetClientRect", "Ptr", dialog.Gui.Hwnd, "Ptr", clientRect.Ptr)
+            dpi := DllCall("GetDpiForWindow", "Ptr", dialog.Gui.Hwnd, "UInt")
+            expectedMinimum := Round(minimumWidth * dpi / 96) + windowWidth - NumGet(clientRect, 8, "Int")
+            Assert(Abs(NumGet(minMaxInfo, 24, "Int") - expectedMinimum) <= 1, "Speech window minimum allows compact row")
+        }
         for size in [{Width: minimumWidth, Height: 200}, {Width: 800, Height: 380}]
         {
             ResizeInputWindow(dialog.Edit, dialog.PinButton, dialog.SelectorList,
-                dialog.CategoryList, dialog.SpeedButton, dialog.SubmitButton, dialog.CancelButton,
+                dialog.SpeedButton, dialog.SubmitButton, dialog.CancelButton,
                 dialog.Gui, 0, size.Width, size.Height)
             AssertInputLayout(dialog, size.Width, size.Height)
+            if mode = "voice" && size.Width = minimumWidth
+            {
+                dialog.PinButton.GetPos(&pinX, , &pinWidth)
+                dialog.SelectorList.GetPos(&selectorX)
+                Assert(Abs(selectorX - pinX - pinWidth - 8) <= 1, "Compact speech row removes excess pin gap")
+            }
         }
     }
     catch Error as inputError
@@ -839,8 +858,6 @@ AssertInputLayout(dialog, width, height)
 {
     dialog.Edit.GetPos(, &editY, , &editHeight)
     controls := [dialog.PinButton]
-    if IsObject(dialog.CategoryList)
-        controls.Push(dialog.CategoryList)
     if IsObject(dialog.SelectorList)
         controls.Push(dialog.SelectorList)
     if IsObject(dialog.SpeedButton)
@@ -850,7 +867,8 @@ AssertInputLayout(dialog, width, height)
     for control in controls
     {
         control.GetPos(&controlX, &controlY, &controlWidth, &controlHeight)
-        Assert(controlX >= previousRight + 6, "Input row controls overlap")
+        Assert(controlX >= previousRight + 6,
+            "Input row controls overlap: x=" . controlX . ", previousRight=" . previousRight . ", width=" . width)
         Assert(controlX + controlWidth <= width - 10, "Input row fits window width")
         Assert(controlY >= editY + editHeight + 6, "Input row overlaps text box")
         Assert(controlY + controlHeight <= height - 8, "Input row fits window height")
@@ -1118,7 +1136,7 @@ TestResultSpeechControls()
             ResizeResultWindow(ResultEdit, ResultPinButton, ResultPauseButton, ResultSpeakButton,
                 ResultCopyButton, ResultCloseButton, ResultGui, 0, size.Width, size.Height)
             AssertInputLayout({Edit: ResultEdit, PinButton: ResultPinButton,
-                CategoryList: 0, SelectorList: 0, SpeedButton: ResultPauseButton,
+                SelectorList: 0, SpeedButton: ResultPauseButton,
                 SubmitButton: ResultSpeakButton, CancelButton: ResultCopyButton}, size.Width, size.Height)
             ResultCopyButton.GetPos(&copyX, , &copyWidth)
             ResultCloseButton.GetPos(&closeX, &closeY, &closeWidth, &closeHeight)

@@ -33,24 +33,23 @@ global CONFIG := {
 }
 
 global SPEECH_VOICES := [
-    {Label: "云希 Yunxi · 自然男声", Voice: "zh-CN-YunxiNeural", Group: "普通话"},
-    {Label: "晓晓 Xiaoxiao · 自然女声", Voice: "zh-CN-XiaoxiaoNeural", Group: "普通话"},
-    {Label: "晓臻 HsiaoChen · 台湾女声", Voice: "zh-TW-HsiaoChenNeural", Group: "台湾"},
-    {Label: "云哲 YunJhe · 台湾男声", Voice: "zh-TW-YunJheNeural", Group: "台湾"},
-    {Label: "晓北 Xiaobei · 东北话", Voice: "zh-CN-liaoning-XiaobeiNeural", Group: "方言"},
-    {Label: "晓佳 HiuGaai · 粤语", Voice: "zh-HK-HiuGaaiNeural", Group: "粤语"},
-    {Label: "云健 Yunjian · 新闻播报", Voice: "zh-CN-YunjianNeural", Group: "普通话"},
-    {Label: "云扬 Yunyang · 短视频旁白", Voice: "zh-CN-YunyangNeural", Group: "普通话"},
-    {Label: "晓伊 Xiaoyi · 萝莉音", Voice: "zh-CN-XiaoyiNeural", Group: "普通话"},
-    {Label: "晓妮 Xiaoni · 陕西话（俏皮）", Voice: "zh-CN-shaanxi-XiaoniNeural", Group: "方言"},
-    {Label: "晓曼 HiuMaan · 港式女声", Voice: "zh-HK-HiuMaanNeural", Group: "粤语"},
-    {Label: "万龙 WanLung · 港式男声", Voice: "zh-HK-WanLungNeural", Group: "粤语"},
-    {Label: "晓雨 HsiaoYu · 台味女声", Voice: "zh-TW-HsiaoYuNeural", Group: "台湾"},
-    {Label: "Jenny · 英语女声", Voice: "en-US-JennyNeural", Group: "英语"},
-    {Label: "Guy · 英语男声", Voice: "en-US-GuyNeural", Group: "英语"}
+    {Label: "云希 Yunxi · 自然男声", Voice: "zh-CN-YunxiNeural"},
+    {Label: "晓晓 Xiaoxiao · 自然女声", Voice: "zh-CN-XiaoxiaoNeural"},
+    {Label: "晓臻 HsiaoChen · 台湾女声", Voice: "zh-TW-HsiaoChenNeural"},
+    {Label: "云哲 YunJhe · 台湾男声", Voice: "zh-TW-YunJheNeural"},
+    {Label: "晓北 Xiaobei · 东北话", Voice: "zh-CN-liaoning-XiaobeiNeural"},
+    {Label: "晓佳 HiuGaai · 粤语", Voice: "zh-HK-HiuGaaiNeural"},
+    {Label: "云健 Yunjian · 新闻播报", Voice: "zh-CN-YunjianNeural"},
+    {Label: "云扬 Yunyang · 短视频旁白", Voice: "zh-CN-YunyangNeural"},
+    {Label: "晓伊 Xiaoyi · 萝莉音", Voice: "zh-CN-XiaoyiNeural"},
+    {Label: "晓妮 Xiaoni · 陕西话（俏皮）", Voice: "zh-CN-shaanxi-XiaoniNeural"},
+    {Label: "晓曼 HiuMaan · 港式女声", Voice: "zh-HK-HiuMaanNeural"},
+    {Label: "万龙 WanLung · 港式男声", Voice: "zh-HK-WanLungNeural"},
+    {Label: "晓雨 HsiaoYu · 台味女声", Voice: "zh-TW-HsiaoYuNeural"},
+    {Label: "Jenny · 英语女声", Voice: "en-US-JennyNeural"},
+    {Label: "Guy · 英语男声", Voice: "en-US-GuyNeural"}
 ]
 
-global SPEECH_VOICE_GROUPS := ["普通话", "方言", "粤语", "台湾", "英语"]
 global SPEECH_SPEEDS := [
     {Value: 0.75, Label: "0.75×", Rate: "-25%"},
     {Value: 1, Label: "1×", Rate: "+0%"},
@@ -89,11 +88,9 @@ global InputDrafts := Map()
 global ActiveTranslationRequest := 0
 global TranslationServiceTrayMenu := 0
 global SpeechVoiceTrayMenu := 0
-global SpeechVoiceTrayMenus := Map()
 global SpeechSpeedTrayMenu := 0
 global ColorThemeTrayMenu := 0
 global SettingsTrayMenu := 0
-global HelpTrayMenu := 0
 global SpeechAudioPath := ""
 global SpeechErrorPath := ""
 global SpeechDonePath := ""
@@ -509,12 +506,12 @@ RegisterSpeakHotkey()
 SetupTrayMenu()
 {
     global CONFIG, IS_PACKAGED, ShowResultAtMouse
-    global TRANSLATION_SERVICES, SPEECH_VOICES, SPEECH_VOICE_GROUPS
+    global TRANSLATION_SERVICES, SPEECH_VOICES
     global TranslationServiceTrayMenu, SpeechVoiceTrayMenu, ColorThemeTrayMenu
-    global SpeechVoiceTrayMenus, SpeechTrayMenuReady
+    global SpeechTrayMenuReady
     global SPEECH_SPEEDS, SpeechSpeedTrayMenu
     global SpeechPauseMenuLabel
-    global SettingsTrayMenu, HelpTrayMenu
+    global SettingsTrayMenu
 
     A_TrayMenu.Delete()
     translateHotkeyText := FormatHotkey(CONFIG.Hotkey)
@@ -544,17 +541,9 @@ SetupTrayMenu()
     A_TrayMenu.Add("翻译服务", TranslationServiceTrayMenu)
 
     SpeechVoiceTrayMenu := Menu()
-    SpeechVoiceTrayMenus := Map()
-
-    for group in SPEECH_VOICE_GROUPS
-    {
-        groupMenu := Menu()
-        SpeechVoiceTrayMenus[group] := groupMenu
-        SpeechVoiceTrayMenu.Add(group, groupMenu)
-    }
 
     for item in SPEECH_VOICES
-        SpeechVoiceTrayMenus[item.Group].Add(item.Label, SetSpeechVoice.Bind(item.Voice))
+        SpeechVoiceTrayMenu.Add(item.Label, SetSpeechVoice.Bind(item.Voice))
 
     UpdateSpeechVoiceTrayChecks()
     A_TrayMenu.Add("朗读音色", SpeechVoiceTrayMenu)
@@ -574,9 +563,9 @@ SetupTrayMenu()
     SettingsTrayMenu.Add("窗口半透明", ToggleWindowTransparency)
     if CONFIG.WindowTransparency
         SettingsTrayMenu.Check("窗口半透明")
-    SettingsTrayMenu.Add("结果显示在鼠标旁", ToggleResultAtMouse)
+    SettingsTrayMenu.Add("翻译结果显示在鼠标旁", ToggleResultAtMouse)
     if ShowResultAtMouse
-        SettingsTrayMenu.Check("结果显示在鼠标旁")
+        SettingsTrayMenu.Check("翻译结果显示在鼠标旁")
     SettingsTrayMenu.Add()
     SettingsTrayMenu.Add("开机自启", ToggleAutostart)
 
@@ -589,13 +578,11 @@ SetupTrayMenu()
     if !IS_PACKAGED && CONFIG.RunAsAdmin
         SettingsTrayMenu.Check("以管理员身份启动")
 
-    HelpTrayMenu := Menu()
-    HelpTrayMenu.Add("打开数据目录", OpenDataDirectory)
-    HelpTrayMenu.Add("在线服务与隐私", ShowOnlineServicesPrivacyDialog)
-    HelpTrayMenu.Add("关于译读", ShowAboutDialog)
     A_TrayMenu.Add()
     A_TrayMenu.Add("设置", SettingsTrayMenu)
-    A_TrayMenu.Add("帮助", HelpTrayMenu)
+    A_TrayMenu.Add("打开数据目录", OpenDataDirectory)
+    A_TrayMenu.Add("在线服务与隐私", ShowOnlineServicesPrivacyDialog)
+    A_TrayMenu.Add("关于译读", ShowAboutDialog)
     A_TrayMenu.Add()
     A_TrayMenu.Add("退出", (*) => ExitApp())
     A_TrayMenu.Default := translateMenuText
@@ -1421,7 +1408,7 @@ ToggleResultAtMouse(*)
     global CONFIG, ResultGui, ShowResultAtMouse, ResultManualPosition
     global SettingsTrayMenu
 
-    menuText := "结果显示在鼠标旁"
+    menuText := "翻译结果显示在鼠标旁"
     ShowResultAtMouse := !ShowResultAtMouse
     CONFIG.ShowResultAtMouse := ShowResultAtMouse
     WriteConfigSetting("ShowResultAtMouse", ShowResultAtMouse ? 1 : 0)
@@ -1589,7 +1576,6 @@ GetSelectedText()
 PromptForText(windowTitle, submitLabel, selectorType := "")
 {
     global CONFIG, SPEECH_VOICES, TRANSLATION_SERVICES, ActiveInputDialog
-    global SPEECH_VOICE_GROUPS
     global InputDrafts
 
     state := {
@@ -1597,15 +1583,14 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
         Text: "",
         Pinned: false,
         DraftKey: selectorType,
-        InitialText: "",
-        VoiceOptions: []
+        InitialText: ""
     }
 
     palette := GetAppearancePalette()
     minimumWidth := selectorType = "translation"
         ? 300
-        : (selectorType = "voice" ? 560 : 360)
-    inputWidth := selectorType = "voice" ? 560 : 460
+        : (selectorType = "voice" ? 524 : 360)
+    inputWidth := selectorType = "voice" ? 524 : 460
     inputGui := Gui(
         "+Resize -MinimizeBox -MaximizeBox +MinSize"
             . minimumWidth . "x200",
@@ -1625,28 +1610,24 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
     state.InitialText := inputEdit.Value
     pinButton := inputGui.AddButton("xm y+10 w72 h26", "钉住")
     selectorList := 0
-    categoryList := 0
     speedButton := 0
     speedTooltip := 0
     ; CBS_OWNERDRAWFIXED | CBS_HASSTRINGS keeps owner-drawn labels as Unicode.
 
     if selectorType = "voice"
     {
-        categoryList := inputGui.AddDropDownList(
-            "x108 yp w80 +0x210", SPEECH_VOICE_GROUPS
-        )
+        voiceLabels := []
+        for item in SPEECH_VOICES
+            voiceLabels.Push(item.Label)
+
         selectorList := inputGui.AddDropDownList(
-            "x196 yp w150 +0x210"
+            "x90 yp w220 +0x210", voiceLabels
         )
-        speedButton := inputGui.AddButton("x354 yp w56 h26", GetSpeechSpeedLabel())
+        speedButton := inputGui.AddButton("x318 yp w56 h26", GetSpeechSpeedLabel())
         speedButton.OnEvent("Click", CycleSpeechSpeed)
         speedTooltip := CreateControlTooltip(inputGui, speedButton, "朗读速度，点击切换")
-        voiceIndex := GetSpeechVoiceIndex(CONFIG.SpeechVoice)
-        selectedGroup := voiceIndex ? SPEECH_VOICES[voiceIndex].Group : SPEECH_VOICE_GROUPS[1]
-        categoryList.Choose(selectedGroup)
-        PopulateSpeechVoices(state, selectorList, selectedGroup)
-        categoryList.OnEvent("Change", ChangeSpeechVoiceGroup.Bind(state, selectorList))
-        selectorList.OnEvent("Change", ChangeSpeechVoice.Bind(state))
+        selectorList.Choose(GetSpeechVoiceIndex(CONFIG.SpeechVoice))
+        selectorList.OnEvent("Change", ChangeSpeechVoice)
     }
     else if selectorType = "translation"
     {
@@ -1674,7 +1655,6 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
         Edit: inputEdit,
         PinButton: pinButton,
         SelectorList: selectorList,
-        CategoryList: categoryList,
         SpeedButton: speedButton,
         SpeedTooltip: speedTooltip,
         SubmitButton: submitButton,
@@ -1699,7 +1679,6 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
             inputEdit,
             pinButton,
             selectorList,
-            categoryList,
             speedButton,
             submitButton,
             cancelButton
@@ -1710,27 +1689,16 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
     if IsObject(speedButton)
         themedControls.Push(speedButton)
 
-    for control in [categoryList, selectorList]
-    {
-        if IsObject(control)
-            themedControls.Push(control)
-    }
+    if IsObject(selectorList)
+        themedControls.Push(selectorList)
 
     ApplyWindowTheme(inputGui, themedControls*)
 
-    for control in [categoryList, selectorList]
+    if IsObject(selectorList)
     {
-        if !IsObject(control)
-            continue
-        ApplyDropDownTheme(control)
-        MatchDropDownHeight(pinButton, control)
-        CenterControlVertically(pinButton, control)
-    }
-
-    if selectorType = "voice"
-    {
-        dropDownDpi := DllCall("GetDpiForWindow", "Ptr", selectorList.Hwnd, "UInt")
-        SendMessage(0x0160, Round(220 * dropDownDpi / 96), , , "ahk_id " . selectorList.Hwnd)
+        ApplyDropDownTheme(selectorList)
+        MatchDropDownHeight(pinButton, selectorList)
+        CenterControlVertically(pinButton, selectorList)
     }
 
     if selectorType = "voice"
@@ -1774,50 +1742,14 @@ CreateControlTooltip(guiObject, control, text)
 }
 
 
-PopulateSpeechVoices(state, voiceList, group)
+ChangeSpeechVoice(voiceList, *)
 {
-    global CONFIG, SPEECH_VOICES
+    global SPEECH_VOICES
 
-    options := []
-    labels := []
-    selectedIndex := 1
-    for item in SPEECH_VOICES
-    {
-        if item.Group != group
-            continue
-        options.Push(item)
-        labels.Push(item.Label)
-        if item.Voice = CONFIG.SpeechVoice
-            selectedIndex := options.Length
-    }
-    state.VoiceOptions := options
-    voiceList.Delete()
-    voiceList.Add(labels)
-    if options.Length
-        voiceList.Choose(selectedIndex)
-}
-
-
-ChangeSpeechVoiceGroup(state, voiceList, categoryList, *)
-{
-    global SPEECH_VOICE_GROUPS
-
-    if categoryList.Value < 1 || categoryList.Value > SPEECH_VOICE_GROUPS.Length
+    if voiceList.Value < 1 || voiceList.Value > SPEECH_VOICES.Length
         return
 
-    PopulateSpeechVoices(state, voiceList, SPEECH_VOICE_GROUPS[categoryList.Value])
-    ChangeSpeechVoice(state, voiceList)
-    MatchDropDownHeight(categoryList, voiceList)
-    CenterControlVertically(categoryList, voiceList)
-}
-
-
-ChangeSpeechVoice(state, voiceList, *)
-{
-    if voiceList.Value < 1 || voiceList.Value > state.VoiceOptions.Length
-        return
-
-    SetSpeechVoice(state.VoiceOptions[voiceList.Value].Voice)
+    SetSpeechVoice(SPEECH_VOICES[voiceList.Value].Voice)
 }
 
 
@@ -1910,24 +1842,17 @@ SetTranslationService(service, *)
 
 UpdateSpeechVoiceTrayChecks()
 {
-    global CONFIG, SPEECH_VOICES, SpeechVoiceTrayMenu, SpeechVoiceTrayMenus
+    global CONFIG, SPEECH_VOICES, SpeechVoiceTrayMenu
 
     if !IsObject(SpeechVoiceTrayMenu)
         return
 
-    for group in SpeechVoiceTrayMenus
-        SpeechVoiceTrayMenu.Uncheck(group)
-
     for item in SPEECH_VOICES
     {
-        groupMenu := SpeechVoiceTrayMenus[item.Group]
-        groupMenu.Uncheck(item.Label)
+        SpeechVoiceTrayMenu.Uncheck(item.Label)
 
         if item.Voice = CONFIG.SpeechVoice
-        {
-            groupMenu.Check(item.Label)
-            SpeechVoiceTrayMenu.Check(item.Group)
-        }
+            SpeechVoiceTrayMenu.Check(item.Label)
     }
 }
 
@@ -2174,7 +2099,6 @@ ResizeInputWindow(
     inputEdit,
     pinButton,
     selectorList,
-    categoryList,
     speedButton,
     submitButton,
     cancelButton,
@@ -2196,13 +2120,6 @@ ResizeInputWindow(
         selectorRight := width - (IsObject(speedButton) ? 214 : 150)
         selectorList.Move(selectorRight - selectorWidth)
         CenterControlVertically(pinButton, selectorList)
-
-        if IsObject(categoryList)
-        {
-            categoryList.GetPos(, , &categoryWidth)
-            categoryList.Move(selectorRight - 8 - selectorWidth - categoryWidth)
-            CenterControlVertically(pinButton, categoryList)
-        }
     }
 
     if IsObject(speedButton)
@@ -4485,10 +4402,9 @@ ApplyAppearanceToOpenWindows()
     {
         ApplyAppearanceToExistingWindow(ActiveInputDialog.Gui)
 
-        for control in [ActiveInputDialog.CategoryList, ActiveInputDialog.SelectorList]
+        if IsObject(ActiveInputDialog.SelectorList)
         {
-            if !IsObject(control)
-                continue
+            control := ActiveInputDialog.SelectorList
             ApplyDropDownTheme(control)
             MatchDropDownHeight(ActiveInputDialog.PinButton, control)
             CenterControlVertically(ActiveInputDialog.PinButton, control)
