@@ -1,4 +1,10 @@
 global ResultSpeakButton := {Text: ""}
+global ResultPauseButton := {Text: "", Enabled: false}
+global ResultEdit := 0
+global ResultPinButton := 0
+global ResultCopyButton := 0
+global ResultCloseButton := 0
+global ResultPinned := false
 global TestDirectory := A_Args[1]
 global CONFIG_DIRECTORY := TestDirectory
 global CONFIG_PATH := TestDirectory . "\YiDu.ini"
@@ -7,6 +13,7 @@ global ShowResultAtMouse := true
 global TestPlaybackMode := "stopped"
 global TestPlaybackCount := 0
 global TestPlaybackError := false
+global TestMciErrorCommand := ""
 global TestNotifications := []
 global TestWorkerStops := 0
 global TestConsent := true
@@ -44,6 +51,10 @@ try
     FileAppend("PASS: splitting`n", "*")
     TestPlaybackQueue()
     FileAppend("PASS: playback queue`n", "*")
+    TestSpeechPause()
+    FileAppend("PASS: pause, resume, segment boundaries and paused cleanup`n", "*")
+    TestResultSpeechControls()
+    FileAppend("PASS: result speech controls, tray synchronization and result layout`n", "*")
     TestFailuresAndCancellation()
     FileAppend(BuildEdgeSpeechWorkerPowerShell("request", "ready", DllCall("GetCurrentProcessId", "UInt")),
         TestDirectory . "\worker.ps1", "UTF-8")
@@ -117,6 +128,7 @@ TestTraySettings()
     TestStartup()
     Assert(TestNotifications.Length = 0 && TestFirstRunCount = 0, "Existing user quiet startup")
     Assert(MenuItemState(A_TrayMenu, "停止朗读") & 3, "Idle stop item disabled")
+    Assert(MenuItemState(A_TrayMenu, "暂停朗读") & 3, "Idle pause item disabled")
     Assert(MenuItemPosition(A_TrayMenu, "语音角色") = -1, "Old voice menu removed")
     Assert(MenuItemPosition(A_TrayMenu, "窗口半透明") = -1, "Transparency moved into appearance")
     Assert(MenuItemPosition(A_TrayMenu, "朗读音色") >= 0, "Voice root menu")
@@ -661,6 +673,202 @@ TestPlaybackQueue()
     StopSpeech()
 }
 
+AssertSpeechControls(paused := false, busy := true)
+{
+    global ResultPauseButton, ResultSpeakButton, SpeechBusy, SpeechSession
+    pauseLabel := paused ? "继续朗读" : "暂停朗读"
+    Assert(SpeechBusy = busy, "Speech busy state")
+    Assert(!!(MenuItemState(A_TrayMenu, pauseLabel) & 3) = !busy, "Pause menu availability")
+    Assert(!!(MenuItemState(A_TrayMenu, "停止朗读") & 3) = !busy, "Stop menu availability")
+    Assert(ResultPauseButton.Text = (paused ? "继续" : "暂停") && ResultPauseButton.Enabled = busy, "Result pause state")
+    Assert(ResultSpeakButton.Text = (busy ? "停止" : "朗读"), "Result stop state")
+    if busy
+        Assert(SpeechSession.Paused = paused, "Session pause state")
+}
+
+TestSpeechPause()
+{
+    global SpeechSession, SpeechMciAlias, SpeechSynthesisPending, TestPlaybackCount
+    global TestPlaybackMode, TestMciErrorCommand, TestNotifications
+
+    StopSpeech()
+    ToggleSpeechPause()
+    AssertSpeechControls(false, false)
+    StartTestSpeech()
+    ToggleSpeechPause()
+    AssertSpeechControls(true)
+    count := TestPlaybackCount
+    CompleteTestChunk()
+    readyPath := SpeechSession.ReadyChunk.AudioPath
+    CheckSpeechPlayback()
+    QueueNextSpeechChunk()
+    Assert(TestPlaybackCount = count && SpeechMciAlias = "" && FileExist(readyPath), "Pause before first audio prevents playback")
+    Assert(!SpeechSynthesisPending && SpeechSession.NextIndex = 2, "Paused synthesis keeps one ready segment")
+    ToggleSpeechPause()
+    AssertSpeechControls()
+    Assert(TestPlaybackCount = count + 1 && SpeechSynthesisPending, "Resume starts ready segment and prefetch")
+    playingPath := SpeechSession.PlayingChunk.AudioPath
+    alias := SpeechMciAlias
+    rate := SpeechSession.Rate
+    ToggleSpeechPause()
+    AssertSpeechControls(true)
+    Assert(TestPlaybackMode = "paused", "MCI pause sent")
+    CompleteTestChunk()
+    readyPath := SpeechSession.ReadyChunk.AudioPath
+    CheckSpeechPlayback()
+    StartReadySpeechChunk()
+    Assert(FileExist(playingPath) && FileExist(readyPath) && SpeechMciAlias = alias, "Paused playback retains audio and device")
+    Assert(TestPlaybackCount = count + 1 && SpeechSession.NextIndex = 3, "Prefetch cannot advance during pause")
+    SetSpeechSpeed(0.75)
+    for attempt in [1, 2, 3]
+    {
+        ToggleSpeechPause()
+        AssertSpeechControls()
+        Assert(TestPlaybackMode = "playing" && SpeechMciAlias = alias
+            && SpeechSession.PlayingChunk.AudioPath = playingPath, "Resume keeps current segment and device")
+        Assert(TestPlaybackCount = count + 1 && SpeechSession.Rate = rate, "Resume does not restart or change session rate")
+        ToggleSpeechPause()
+    }
+    StopSpeech()
+    AssertSpeechControls(false, false)
+    Assert(!FileExist(playingPath) && !FileExist(readyPath), "Stop while paused cleans current and prefetched audio")
+
+    StartTestSpeech()
+    CompleteTestChunk()
+    FinishTestPlayback()
+    Assert(SpeechMciAlias = "" && SpeechSynthesisPending, "Waiting at segment boundary")
+    ToggleSpeechPause()
+    count := TestPlaybackCount
+    CompleteTestChunk()
+    AssertSpeechControls(true)
+    Assert(TestPlaybackCount = count, "Boundary pause holds next segment")
+    ToggleSpeechPause()
+    Assert(TestPlaybackCount = count + 1 && SpeechSynthesisPending, "Boundary resume starts next segment")
+    StopSpeech()
+
+    StartTestSpeech()
+    CompleteTestChunk()
+    CompleteTestChunk()
+    playingPath := SpeechSession.PlayingChunk.AudioPath
+    TestPlaybackMode := "stopped"
+    count := TestPlaybackCount
+    ToggleSpeechPause()
+    CheckSpeechPlayback()
+    AssertSpeechControls(true)
+    Assert(FileExist(playingPath), "Pause at completed segment retains queue until resumed")
+    ToggleSpeechPause()
+    Assert(!FileExist(playingPath) && TestPlaybackCount = count + 1, "Resume advances completed segment exactly once")
+    StopSpeech()
+
+    StartTestSpeech(20)
+    ToggleSpeechPause()
+    ToggleSpeechPause()
+    CompleteTestChunk()
+    ToggleSpeechPause()
+    ToggleSpeechPause()
+    FinishTestPlayback()
+    AssertSpeechControls(false, false)
+
+    StartTestSpeech(20)
+    ToggleSpeechPause()
+    CompleteTestChunk()
+    readyPath := SpeechSession.ReadyChunk.AudioPath
+    StartEdgeSpeech("replacement", "en-US-JennyNeural")
+    AssertSpeechControls()
+    Assert(!FileExist(readyPath), "Replacement clears paused audio")
+    StopSpeech()
+
+    for failedCommand in ["pause ", "resume "]
+    {
+        StartTestSpeech()
+        CompleteTestChunk()
+        playingPath := SpeechSession.PlayingChunk.AudioPath
+        if failedCommand = "resume "
+            ToggleSpeechPause()
+        TestMciErrorCommand := failedCommand
+        ToggleSpeechPause()
+        TestMciErrorCommand := ""
+        AssertSpeechControls(false, false)
+        Assert(TestNotifications.Length = 1 && !FileExist(playingPath), "Pause or resume failure reports error and cleans audio")
+    }
+}
+
+DispatchSpeechMenu(label)
+{
+    commandId := DllCall("GetMenuItemID", "Ptr", A_TrayMenu.Handle,
+        "Int", MenuItemPosition(A_TrayMenu, label), "UInt")
+    PostMessage(0x0111, commandId, 0, , "ahk_id " . A_ScriptHwnd)
+    Critical "Off"
+    Sleep(30)
+    Critical
+}
+
+DispatchResultButton(button)
+{
+    global ResultGui
+    buttonId := DllCall("GetDlgCtrlID", "Ptr", button.Hwnd, "Int")
+    PostMessage(0x0111, buttonId, button.Hwnd, , "ahk_id " . ResultGui.Hwnd)
+    Critical "Off"
+    Sleep(30)
+    Critical
+}
+
+TestResultSpeechControls()
+{
+    global ResultGui, ResultEdit, ResultPinButton, ResultPauseButton, ResultSpeakButton
+    global ResultCopyButton, ResultCloseButton, SpeechSession, SpeechMciAlias
+
+    CreateResultWindow()
+    try
+    {
+        ResultGui.Show("Hide w400 h200")
+        for size in [{Width: 400, Height: 128}, {Width: 800, Height: 380}]
+        {
+            ResizeResultWindow(ResultEdit, ResultPinButton, ResultPauseButton, ResultSpeakButton,
+                ResultCopyButton, ResultCloseButton, ResultGui, 0, size.Width, size.Height)
+            AssertInputLayout({Edit: ResultEdit, PinButton: ResultPinButton,
+                CategoryList: 0, SelectorList: 0, SpeedButton: ResultPauseButton,
+                SubmitButton: ResultSpeakButton, CancelButton: ResultCopyButton}, size.Width, size.Height)
+            ResultCopyButton.GetPos(&copyX, , &copyWidth)
+            ResultCloseButton.GetPos(&closeX, &closeY, &closeWidth, &closeHeight)
+            Assert(closeX >= copyX + copyWidth + 6 && closeX + closeWidth <= size.Width - 10
+                && closeY + closeHeight <= size.Height - 8, "Result close button fits row")
+        }
+        AssertSpeechControls(false, false)
+        ResultEdit.Value := "result text"
+        DispatchResultButton(ResultSpeakButton)
+        AssertSpeechControls()
+        CompleteTestChunk()
+        alias := SpeechMciAlias
+        DispatchSpeechMenu("暂停朗读")
+        AssertSpeechControls(true)
+        DispatchResultButton(ResultPauseButton)
+        AssertSpeechControls()
+        Assert(SpeechMciAlias = alias, "Result resume uses same playback device")
+        DispatchResultButton(ResultPauseButton)
+        AssertSpeechControls(true)
+        SetupTrayMenu()
+        AssertSpeechControls(true)
+        DispatchSpeechMenu("继续朗读")
+        AssertSpeechControls()
+        DispatchResultButton(ResultPauseButton)
+        DispatchResultButton(ResultSpeakButton)
+        AssertSpeechControls(false, false)
+    }
+    finally
+    {
+        StopSpeech()
+        ResultGui.Destroy()
+        ResultGui := 0
+        ResultEdit := 0
+        ResultPinButton := 0
+        ResultPauseButton := {Text: "暂停", Enabled: false}
+        ResultSpeakButton := {Text: "朗读"}
+        ResultCopyButton := 0
+        ResultCloseButton := 0
+    }
+}
+
 TestFailuresAndCancellation()
 {
     global SpeechSession, SpeechBusy, SpeechSynthesisPending, SpeechStartedAt
@@ -826,6 +1034,9 @@ StopSpeechWorker(*)
 MciSend(command)
 {
     global TestPlaybackMode, TestPlaybackCount, TestPlaybackError
+    global TestMciErrorCommand
+    if TestMciErrorCommand != "" && SubStr(command, 1, StrLen(TestMciErrorCommand)) = TestMciErrorCommand
+        return 1
     if SubStr(command, 1, 5) = "open " && TestPlaybackError
         return 1
     if SubStr(command, 1, 5) = "play "
@@ -833,6 +1044,12 @@ MciSend(command)
         TestPlaybackMode := "playing"
         TestPlaybackCount += 1
     }
+    if SubStr(command, 1, 6) = "pause "
+        TestPlaybackMode := "paused"
+    if SubStr(command, 1, 7) = "resume "
+        TestPlaybackMode := "playing"
+    if SubStr(command, 1, 6) = "close " || SubStr(command, 1, 5) = "stop "
+        TestPlaybackMode := "stopped"
     return 0
 }
 

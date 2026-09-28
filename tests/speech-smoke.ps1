@@ -61,6 +61,23 @@ try {
             $null = Invoke-Mci 'setaudio YiDuSpeechSmoke volume to 0'
             $null = Invoke-Mci 'play YiDuSpeechSmoke'
             if ((Invoke-Mci 'status YiDuSpeechSmoke mode') -ne 'playing') { throw 'Audio did not start playing.' }
+            if ($index -eq 0) {
+                Start-Sleep -Milliseconds 150
+                $null = Invoke-Mci 'pause YiDuSpeechSmoke'
+                if ((Invoke-Mci 'status YiDuSpeechSmoke mode') -ne 'paused') { throw 'Audio did not pause.' }
+                $pausedPosition = [int](Invoke-Mci 'status YiDuSpeechSmoke position')
+                Start-Sleep -Milliseconds 200
+                $heldPosition = [int](Invoke-Mci 'status YiDuSpeechSmoke position')
+                if ($pausedPosition -le 0 -or [Math]::Abs($heldPosition - $pausedPosition) -gt 30) {
+                    throw 'Paused playback position was not preserved.'
+                }
+                $null = Invoke-Mci 'resume YiDuSpeechSmoke'
+                if ((Invoke-Mci 'status YiDuSpeechSmoke mode') -ne 'playing') { throw 'Audio did not resume.' }
+                Start-Sleep -Milliseconds 150
+                $resumedPosition = [int](Invoke-Mci 'status YiDuSpeechSmoke position')
+                if ($resumedPosition -le $heldPosition) { throw 'Resume did not continue from the paused position.' }
+                Write-Output 'PASS: real MCI pause/resume preserves playback position'
+            }
             Write-Output ("PASS: live speech {0}, {1} ms, {2} bytes, MCI playback" -f $labels[$index], $duration, (Get-Item -LiteralPath $audioPath).Length)
         }
         finally { $null = Invoke-Mci 'close YiDuSpeechSmoke' }

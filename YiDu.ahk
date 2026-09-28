@@ -76,6 +76,7 @@ global ResultGui := 0
 global ResultEdit := 0
 global ResultPinButton := 0
 global ResultSpeakButton := 0
+global ResultPauseButton := 0
 global ResultCopyButton := 0
 global ResultCloseButton := 0
 global ResultPinned := false
@@ -97,6 +98,7 @@ global SpeechErrorPath := ""
 global SpeechDonePath := ""
 global SpeechBusy := false
 global SpeechTrayMenuReady := false
+global SpeechPauseMenuLabel := "暂停朗读"
 global SpeechStartedAt := 0
 global SpeechTimeoutMs := 60000
 global SpeechSynthesisPending := false
@@ -510,6 +512,7 @@ SetupTrayMenu()
     global TranslationServiceTrayMenu, SpeechVoiceTrayMenu, ColorThemeTrayMenu
     global SpeechVoiceTrayMenus, AppearanceTrayMenu, SpeechTrayMenuReady
     global SPEECH_SPEEDS, SpeechSpeedTrayMenu
+    global SpeechPauseMenuLabel
 
     A_TrayMenu.Delete()
     translateHotkeyText := FormatHotkey(CONFIG.Hotkey)
@@ -518,6 +521,8 @@ SetupTrayMenu()
     speakMenuText := "朗读`t" . speakHotkeyText
     A_TrayMenu.Add(translateMenuText, TranslateFromTray)
     A_TrayMenu.Add(speakMenuText, SpeakFromTray)
+    SpeechPauseMenuLabel := "暂停朗读"
+    A_TrayMenu.Add(SpeechPauseMenuLabel, ToggleSpeechPause)
     A_TrayMenu.Add("停止朗读", StopSpeech)
     SpeechTrayMenuReady := true
     UpdateSpeechTrayState()
@@ -607,15 +612,43 @@ SetupTrayMenu()
 
 UpdateSpeechTrayState()
 {
-    global SpeechBusy, SpeechTrayMenuReady
+    global SpeechBusy, SpeechTrayMenuReady, SpeechSession, SpeechPauseMenuLabel
 
     if !SpeechTrayMenuReady
         return
 
+    pauseLabel := IsObject(SpeechSession) && SpeechSession.Paused ? "继续朗读" : "暂停朗读"
+    if SpeechPauseMenuLabel != pauseLabel
+    {
+        A_TrayMenu.Rename(SpeechPauseMenuLabel, pauseLabel)
+        SpeechPauseMenuLabel := pauseLabel
+    }
+
     if SpeechBusy
+    {
+        A_TrayMenu.Enable(SpeechPauseMenuLabel)
         A_TrayMenu.Enable("停止朗读")
+    }
     else
+    {
+        A_TrayMenu.Disable(SpeechPauseMenuLabel)
         A_TrayMenu.Disable("停止朗读")
+    }
+}
+
+
+UpdateSpeechControls()
+{
+    global SpeechBusy, SpeechSession, ResultSpeakButton, ResultPauseButton
+
+    UpdateSpeechTrayState()
+    if IsObject(ResultSpeakButton)
+        ResultSpeakButton.Text := SpeechBusy ? "停止" : "朗读"
+    if IsObject(ResultPauseButton)
+    {
+        ResultPauseButton.Text := IsObject(SpeechSession) && SpeechSession.Paused ? "继续" : "暂停"
+        ResultPauseButton.Enabled := SpeechBusy
+    }
 }
 
 
@@ -2923,7 +2956,7 @@ UrlEncode(text)
 ShowTranslationResult(translatedText, pending := false)
 {
     global ResultGui, ResultEdit, ResultPinButton, ResultSpeakButton
-    global ResultCopyButton, ResultCloseButton
+    global ResultPauseButton, ResultCopyButton, ResultCloseButton
     global ShowResultAtMouse
 
     isNewWindow := !IsObject(ResultGui)
@@ -2937,6 +2970,7 @@ ShowTranslationResult(translatedText, pending := false)
     ResultEdit.Opt(pending ? "+ReadOnly" : "-ReadOnly")
     ResultSpeakButton.Enabled := !pending
     ResultCopyButton.Enabled := !pending
+    UpdateSpeechControls()
 
     if isNewWindow
     {
@@ -2945,10 +2979,11 @@ ShowTranslationResult(translatedText, pending := false)
             ResultEdit,
             ResultPinButton,
             ResultSpeakButton,
+            ResultPauseButton,
             ResultCopyButton,
             ResultCloseButton
         )
-        ResultGui.Show("w360 h200")
+        ResultGui.Show("w400 h200")
         ApplyWindowTransparency(ResultGui)
     }
     else
@@ -3115,11 +3150,11 @@ ShowTranslationError(message)
 CreateResultWindow()
 {
     global ResultGui, ResultEdit, ResultPinButton, ResultSpeakButton
-    global ResultCopyButton, ResultCloseButton
+    global ResultPauseButton, ResultCopyButton, ResultCloseButton
 
     palette := GetAppearancePalette()
     ResultGui := Gui(
-        "+Resize +MinSize320x128",
+        "+Resize +MinSize400x128",
         "翻译结果"
     )
     ResultGui.MarginX := 10
@@ -3128,16 +3163,18 @@ CreateResultWindow()
     ResultGui.SetFont("s10 c" . palette.Text, "Microsoft YaHei UI")
 
     ResultEdit := ResultGui.AddEdit(
-        "xm ym w360 h144 +Multi +WantReturn Background"
+        "xm ym w380 h144 +Multi +WantReturn Background"
             . palette.FieldBackground . " c" . palette.Text
     )
     ResultPinButton := ResultGui.AddButton("xm y+10 w72 h26", "钉住")
-    ResultSpeakButton := ResultGui.AddButton("x146 yp w64 h26", "朗读")
+    ResultPauseButton := ResultGui.AddButton("x114 yp w64 h26", "暂停")
+    ResultSpeakButton := ResultGui.AddButton("x186 yp w64 h26", "朗读")
     ResultCopyButton := ResultGui.AddButton("x+8 yp w72 h26 Default", "复制结果")
     ResultCloseButton := ResultGui.AddButton("x+8 yp w52 h26", "关闭")
 
     ResultPinButton.OnEvent("Click", ToggleResultPinned)
     ResultSpeakButton.OnEvent("Click", SpeakCurrentTranslation)
+    ResultPauseButton.OnEvent("Click", ToggleSpeechPause)
     ResultCopyButton.OnEvent("Click", CopyCurrentTranslation)
     ResultCloseButton.OnEvent("Click", HideResultWindow)
     ResultGui.OnEvent("Close", HideResultWindow)
@@ -3147,11 +3184,13 @@ CreateResultWindow()
         ResizeResultWindow.Bind(
             ResultEdit,
             ResultPinButton,
+            ResultPauseButton,
             ResultSpeakButton,
             ResultCopyButton,
             ResultCloseButton
         )
     )
+    UpdateSpeechControls()
 }
 
 
@@ -3230,7 +3269,7 @@ SpeakCurrentTranslation(*)
 
 StartEdgeSpeech(text, voice)
 {
-    global CONFIG, SPEECH_SPEEDS, ResultSpeakButton, SpeechBusy, SpeechSession
+    global CONFIG, SPEECH_SPEEDS, SpeechBusy, SpeechSession
 
     Critical
 
@@ -3258,13 +3297,65 @@ StartEdgeSpeech(text, voice)
         NextIndex: 1,
         PendingChunk: 0,
         ReadyChunk: 0,
-        PlayingChunk: 0
+        PlayingChunk: 0,
+        Paused: false
     }
     SpeechBusy := true
-    UpdateSpeechTrayState()
-    if IsObject(ResultSpeakButton)
-        ResultSpeakButton.Text := "停止"
+    UpdateSpeechControls()
     QueueNextSpeechChunk()
+}
+
+
+ToggleSpeechPause(*)
+{
+    global SpeechBusy, SpeechSession, SpeechMciAlias
+
+    previousCritical := A_IsCritical
+    Critical
+    try
+    {
+        if !SpeechBusy || !IsObject(SpeechSession)
+            return
+
+        paused := !SpeechSession.Paused
+        try
+        {
+            if SpeechMciAlias != ""
+            {
+                mode := MciGetMode(SpeechMciAlias)
+                if mode = "playing" || mode = "seeking" || mode = "paused"
+                {
+                    result := MciSend((paused ? "pause " : "resume ") . SpeechMciAlias)
+                    if result
+                        throw Error(GetMciErrorMessage(result))
+                }
+                else if mode != "stopped" && mode != "open"
+                    throw Error("无法获取播放状态。")
+            }
+
+            SpeechSession.Paused := paused
+            UpdateSpeechControls()
+            if paused
+                SetTimer(CheckSpeechPlayback, 0)
+            else if SpeechMciAlias != ""
+            {
+                SetTimer(CheckSpeechPlayback, 50)
+                CheckSpeechPlayback()
+                QueueNextSpeechChunk()
+            }
+            else
+            {
+                StartReadySpeechChunk()
+                QueueNextSpeechChunk()
+            }
+        }
+        catch Error as err
+        {
+            StopSpeech()
+            TrayTip("无法" . (paused ? "暂停" : "继续") . "朗读：" . err.Message, "译读朗读", 2)
+        }
+    }
+    finally Critical(previousCritical)
 }
 
 
@@ -3331,7 +3422,7 @@ QueueNextSpeechChunk()
     global SpeechSession, SpeechAudioPath, SpeechErrorPath, SpeechDonePath
     global SpeechWorkerRequestPath, SpeechSynthesisPending, SpeechStartedAt
 
-    if !IsObject(SpeechSession) || SpeechSynthesisPending
+    if !IsObject(SpeechSession) || SpeechSession.Paused || SpeechSynthesisPending
         || IsObject(SpeechSession.ReadyChunk)
         || SpeechSession.NextIndex > SpeechSession.Chunks.Length
         return
@@ -3457,7 +3548,7 @@ StartReadySpeechChunk()
 {
     global SpeechSession
 
-    if !IsObject(SpeechSession) || IsObject(SpeechSession.PlayingChunk)
+    if !IsObject(SpeechSession) || SpeechSession.Paused || IsObject(SpeechSession.PlayingChunk)
         || !IsObject(SpeechSession.ReadyChunk)
         return
 
@@ -3501,6 +3592,9 @@ CheckSpeechPlayback()
 
     Critical
 
+    if IsObject(SpeechSession) && SpeechSession.Paused
+        return
+
     if SpeechMciAlias = ""
     {
         SetTimer(CheckSpeechPlayback, 0)
@@ -3509,7 +3603,7 @@ CheckSpeechPlayback()
 
     mode := MciGetMode(SpeechMciAlias)
 
-    if mode = "playing" || mode = "seeking"
+    if mode = "playing" || mode = "seeking" || mode = "paused"
         return
 
     SetTimer(CheckSpeechPlayback, 0)
@@ -3537,7 +3631,7 @@ CheckSpeechPlayback()
 
 StopSpeech(*)
 {
-    global ResultSpeakButton, SpeechAudioPath, SpeechErrorPath, SpeechDonePath
+    global SpeechAudioPath, SpeechErrorPath, SpeechDonePath
     global SpeechBusy, SpeechStartedAt, SpeechMciAlias
     global SpeechTimeoutMs, SpeechSynthesisPending
     global SpeechSession
@@ -3582,13 +3676,10 @@ StopSpeech(*)
         SpeechErrorPath := ""
         SpeechDonePath := ""
         SpeechBusy := false
-        UpdateSpeechTrayState()
+        UpdateSpeechControls()
         SpeechStartedAt := 0
         SpeechTimeoutMs := 60000
         SpeechSynthesisPending := false
-
-        if IsObject(ResultSpeakButton)
-            ResultSpeakButton.Text := "朗读"
     }
     finally Critical(previousCritical)
 }
@@ -4484,6 +4575,7 @@ RedrawGuiWindow(guiObject)
 ResizeResultWindow(
     resultEdit,
     pinButton,
+    pauseButton,
     speakButton,
     copyButton,
     closeButton,
@@ -4498,6 +4590,7 @@ ResizeResultWindow(
 
     resultEdit.Move(10, 10, Max(120, width - 20), Max(72, height - 56))
     pinButton.Move(10, height - 36)
+    pauseButton.Move(width - 286, height - 36)
     speakButton.Move(width - 214, height - 36)
     copyButton.Move(width - 142, height - 36)
     closeButton.Move(width - 62, height - 36)

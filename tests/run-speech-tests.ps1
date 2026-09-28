@@ -37,6 +37,9 @@ try {
     $translationStart = Get-SourceBlock "`nStartTranslationRequest(" "`nStartNextTranslationChunk("
     $translationEvents = Get-SourceBlock "`nRetryCurrentTranslationChunk()`n" "`nBuildTranslationRequest("
     $hideResult = Get-SourceBlock "`nHideResultWindow(*)`n" "`nCopyCurrentTranslation(*)`n"
+    $resultCreate = Get-SourceBlock "`nCreateResultWindow()`n" "`nHideResultWindow(*)`n"
+    $resultCommands = Get-SourceBlock "`nCopyCurrentTranslation(*)`n" "`nStartEdgeSpeech(text, voice)`n"
+    $resultResize = Get-SourceBlock "`nResizeResultWindow(" "`nclass JsonParser`n"
     $windowRect = Get-SourceBlock "`nGetPhysicalWindowRect(" "`nMoveWindowPhysical("
     $appearance = Get-SourceBlock "`nGetAppearancePalette()`n" "`nApplyAppearanceToOpenWindows()`n"
     $dropDownTheme = Get-SourceBlock "`nSetPreferredAppColorMode(" "`nApplyAppearanceToExistingWindow("
@@ -47,6 +50,7 @@ try {
         $settings + $menuGlobals + $globals + $tests + $speech + $worker + $tray +
         $configFunctions + $voiceFunctions + $format + $startup + $inputFunctions +
         $inputEvents + $translationStart + $translationEvents + $hideResult +
+        $resultCreate + $resultCommands + $resultResize +
         $windowRect + $appearance + $dropDownTheme + $redraw, [Text.UTF8Encoding]::new($true))
 
     & $AutoHotkeyPath /ErrorStdOut /iLib (Join-Path $testDirectory 'includes.txt') (Join-Path $PSScriptRoot '..\YiDu.ahk') | Write-Output
