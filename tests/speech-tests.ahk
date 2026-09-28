@@ -13,6 +13,14 @@ global TestConsent := true
 global TestFirstRunCount := 0
 global TestAppearanceUpdates := 0
 global ActiveInputDialog := 0
+global InputDrafts := Map()
+global TestInputClipboard := "Alpha"
+global TestDraftScenario := 0
+global TranslationBusy := false
+global ActiveTranslationRequest := 0
+global TestTranslationResults := []
+global TestTranslationErrors := []
+global TestTranslationTransport := 0
 global ResultGui := 0
 global TestInputError := ""
 global TestTooltipHwnd := 0
@@ -28,6 +36,10 @@ try
     FileAppend("PASS: tray menus, saved settings and quiet startup`n", "*")
     TestInputWindows()
     FileAppend("PASS: linked voice selectors, saved selection and input layout`n", "*")
+    TestInputDrafts()
+    FileAppend("PASS: input drafts, selection restoration and explicit dismissal`n", "*")
+    TestTranslationCancellation()
+    FileAppend("PASS: translation cancellation, late callbacks and subsequent requests`n", "*")
     TestSplitting()
     FileAppend("PASS: splitting`n", "*")
     TestPlaybackQueue()
@@ -160,9 +172,15 @@ InspectTestInput(mode)
 {
     global ActiveInputDialog, CONFIG, CONFIG_PATH, SPEECH_VOICES, SPEECH_VOICE_GROUPS
     global TestInputError, TestTooltipHwnd, SPEECH_SPEEDS, SpeechSpeedTrayMenu
+    global TestDraftScenario
     Critical
     if !IsObject(ActiveInputDialog)
         return
+    if IsObject(TestDraftScenario)
+    {
+        InspectDraftInput(mode)
+        return
+    }
     clientRect := Buffer(16, 0)
     DllCall("GetClientRect", "Ptr", ActiveInputDialog.Gui.Hwnd, "Ptr", clientRect.Ptr)
     if NumGet(clientRect, 8, "Int") < 200
@@ -253,6 +271,266 @@ InspectTestInput(mode)
         if IsObject(ActiveInputDialog)
             CancelTranslationInput(ActiveInputDialog.Gui)
     }
+}
+
+TestInputDrafts()
+{
+    global InputDrafts, TestInputClipboard
+    InputDrafts.Clear()
+    TestInputClipboard := "Alpha"
+    RunDraftInput("voice", {Expected: "Alpha", Action: "blur"})
+    Assert(!InputDrafts.Has("voice"), "Unedited clipboard does not become a draft")
+
+    RunDraftInput("voice", {Expected: "Alpha", Text: "alpha", Selection: 2, Action: "blur"})
+    Assert(InputDrafts["voice"].Text == "alpha", "Case-only edits preserved")
+    SetSpeechSpeed(1.25)
+    RunDraftInput("voice", {Expected: "alpha", ExpectedSelection: 2, Action: "blur"})
+    Assert(InputDrafts.Has("voice"), "Restored draft remains after another blur")
+
+    RunDraftInput("translation", {Expected: "Alpha", Text: "  draft`r`n text  ", Selection: 4, SelectionEnd: 10, Action: "blur"})
+    translationText := InputDrafts["translation"].Text
+    Assert(InStr(translationText, "`n") && SubStr(translationText, 1, 2) = "  ", "Whitespace preserved")
+    Assert(InputDrafts["voice"].Text == "alpha", "Mode drafts are independent")
+    RunDraftInput("voice", {Expected: "alpha", Text: "", Selection: 0, Action: "blur"})
+    Assert(InputDrafts.Has("voice") && InputDrafts["voice"].Text = "", "Empty edited draft retained")
+    RunDraftInput("voice", {Expected: "", ExpectedSelection: 0, Action: "cancel"})
+    Assert(!InputDrafts.Has("voice") && InputDrafts.Has("translation"), "Cancel clears only its own draft")
+
+    result := RunDraftInput("translation", {Expected: translationText, ExpectedSelection: 4, ExpectedSelectionEnd: 10, Action: "submit"})
+    Assert(result == Trim(translationText) && !InputDrafts.Has("translation"), "Submission clears restored draft")
+
+    for action in ["cancel", "close", "escape"]
+    {
+        RunDraftInput("voice", {Expected: "Alpha", Text: "saved text", Selection: 3, Action: "blur"})
+        RunDraftInput("voice", {Expected: "saved text", ExpectedSelection: 3, Action: action})
+        Assert(!InputDrafts.Has("voice"), "Explicit dismissal clears draft: " . action)
+    }
+    RunDraftInput("voice", {Expected: "Alpha", Text: "pinned draft", Selection: 5, Action: "pinned"})
+    Assert(InputDrafts["voice"].Text == "pinned draft", "Pinned draft retained after unpinning and blur")
+    InputDrafts.Clear()
+}
+
+RunDraftInput(mode, scenario)
+{
+    global TestDraftScenario, TestInputError
+    TestDraftScenario := scenario
+    TestInputError := ""
+    Critical "Off"
+    result := PromptForText("Draft test", "提交", mode)
+    Critical
+    TestDraftScenario := 0
+    Assert(TestInputError = "", TestInputError)
+    return result
+}
+
+InspectDraftInput(mode)
+{
+    global ActiveInputDialog, TestDraftScenario, TestInputError
+    try
+    {
+        dialog := ActiveInputDialog
+        scenario := TestDraftScenario
+        Assert(dialog.Edit.Value == scenario.Expected, "Draft text restored for " . mode)
+        if scenario.HasOwnProp("ExpectedSelection")
+        {
+            selection := Buffer(8, 0)
+            SendMessage(0x00B0, selection.Ptr, selection.Ptr + 4, , "ahk_id " . dialog.Edit.Hwnd)
+            expectedEnd := scenario.HasOwnProp("ExpectedSelectionEnd") ? scenario.ExpectedSelectionEnd : scenario.ExpectedSelection
+            Assert(NumGet(selection, 0, "UInt") = scenario.ExpectedSelection
+                && NumGet(selection, 4, "UInt") = expectedEnd, "Caret and selection restored")
+        }
+        if scenario.HasOwnProp("Text")
+        {
+            dialog.Edit.Value := scenario.Text
+            selectionEnd := scenario.HasOwnProp("SelectionEnd") ? scenario.SelectionEnd : scenario.Selection
+            SendMessage(0x00B1, scenario.Selection, selectionEnd, , "ahk_id " . dialog.Edit.Hwnd)
+        }
+        if scenario.Action = "pinned"
+        {
+            ToggleInputPinned(dialog.State, dialog.Gui, dialog.PinButton)
+            CloseInactiveInputWindow(dialog.Gui.Hwnd)
+            Assert(IsObject(ActiveInputDialog), "Pinned input survives blur")
+            ToggleInputPinned(dialog.State, dialog.Gui, dialog.PinButton)
+            CloseInactiveInputWindow(dialog.Gui.Hwnd + 1)
+            Assert(IsObject(ActiveInputDialog), "Stale blur callback does not close a different window")
+            HandleWindowActivation(1, 0, 0x0006, dialog.Gui.Hwnd)
+            Assert(IsObject(ActiveInputDialog), "Activation does not close input")
+        }
+        if scenario.Action = "blur" || scenario.Action = "pinned"
+            CloseInactiveInputWindow(dialog.Gui.Hwnd)
+        else if scenario.Action = "submit"
+            SubmitTextInput(dialog.State, dialog.Edit, dialog.Gui)
+        else if scenario.Action = "cancel"
+        {
+            buttonId := DllCall("GetDlgCtrlID", "Ptr", dialog.CancelButton.Hwnd, "Int")
+            PostMessage(0x0111, buttonId, dialog.CancelButton.Hwnd, , "ahk_id " . dialog.Gui.Hwnd)
+        }
+        else if scenario.Action = "close"
+            PostMessage(0x0010, , , , "ahk_id " . dialog.Gui.Hwnd)
+        else if scenario.Action = "escape"
+        {
+            ControlSend("{Escape}", dialog.Edit, "ahk_id " . dialog.Gui.Hwnd)
+        }
+        if IsObject(ActiveInputDialog)
+        {
+            Critical "Off"
+            Sleep(40)
+            Critical
+        }
+        Assert(!IsObject(ActiveInputDialog), "Input dismissed through " . scenario.Action)
+    }
+    catch Error as inputError
+        TestInputError := inputError.Message
+    finally
+    {
+        if IsObject(ActiveInputDialog)
+            CancelTranslationInput(ActiveInputDialog.Gui)
+    }
+}
+
+TestTranslationCancellation()
+{
+    global CONFIG, ActiveTranslationRequest, TranslationBusy, ResultGui
+    global TestTranslationTransport, TestTranslationResults, TestTranslationErrors
+    global SpeechBusy, SpeechSession
+    savedService := CONFIG.TranslationService
+    savedInterval := CONFIG.RequestPollIntervalMs
+    CONFIG.RequestPollIntervalMs := 10
+    ResultGui := TestResultWindow()
+    try
+    {
+        for service in ["google", "youdao"]
+        {
+            CONFIG.TranslationService := service
+            for abortThrows in [false, true]
+            {
+                TestTranslationTransport := TestTranslationHttp(abortThrows)
+                TranslationBusy := true
+                StartTranslationRequest("pending", "en")
+                Assert(IsObject(ActiveTranslationRequest) && !ResultGui.Hidden, "Pending translation shown")
+                TestTranslationTransport.Completed := true
+                resultCount := TestTranslationResults.Length
+                HideResultWindow()
+                Assert(!TranslationBusy && !IsObject(ActiveTranslationRequest), "Cancellation clears request and busy state")
+                Assert(TestTranslationTransport.Aborts = 1 && ResultGui.Hidden, "Close aborts transport and hides result")
+                Assert(TestTranslationTransport.DetachedOnAbort, "State detached before transport abort")
+                CheckTranslationRequest()
+                Critical "Off"
+                Sleep(40)
+                Critical
+                Assert(TestTranslationTransport.Reads = 0, "Cancelled transport no longer polled")
+                Assert(TestTranslationResults.Length = resultCount && TestTranslationErrors.Length = 0
+                    && ResultGui.Hidden, "Late completion cannot reopen result or error")
+            }
+        }
+
+        TestTranslationTransport := TestTranslationHttp()
+        TranslationBusy := true
+        StartTranslationRequest("new request", "en")
+        Assert(IsObject(ActiveTranslationRequest), "New request starts after cancellation")
+        TestTranslationTransport.Completed := true
+        CheckTranslationRequest()
+        Assert(!TranslationBusy && !IsObject(ActiveTranslationRequest), "New request finishes normally")
+        Assert(TestTranslationResults[-1] = "translated", "New result delivered")
+        StartTestSpeech()
+        session := SpeechSession
+        HideResultWindow()
+        Assert(ResultGui.Hidden && TestTranslationTransport.Aborts = 0, "Closing completed result only hides it")
+        Assert(SpeechBusy && SpeechSession = session, "Closing result preserves speech session")
+        StopSpeech()
+    }
+    finally
+    {
+        CancelTranslationRequest()
+        CONFIG.TranslationService := savedService
+        CONFIG.RequestPollIntervalMs := savedInterval
+        ResultGui := 0
+    }
+}
+
+class TestTranslationHttp
+{
+    Aborts := 0
+    Reads := 0
+    Completed := false
+    DetachedOnAbort := false
+    __New(abortThrows := false)
+    {
+        this.AbortThrows := abortThrows
+    }
+    readyState
+    {
+        get
+        {
+            this.Reads++
+            return this.Completed ? 4 : 1
+        }
+    }
+    WaitForResponse(*)
+    {
+        this.Reads++
+        return this.Completed
+    }
+    Abort()
+    {
+        global ActiveTranslationRequest, TranslationBusy
+        this.Aborts++
+        this.DetachedOnAbort := !IsObject(ActiveTranslationRequest) && !TranslationBusy
+        if this.AbortThrows
+            throw Error("Synthetic abort failure")
+    }
+}
+
+class TestResultWindow
+{
+    Hidden := true
+    Hide()
+    {
+        this.Hidden := true
+    }
+}
+
+SplitTranslationText(text)
+{
+    return [text]
+}
+
+StartNextTranslationChunk(retryCurrent := false)
+{
+    global ActiveTranslationRequest, TestTranslationTransport, CONFIG
+    ActiveTranslationRequest.ChunkIndex++
+    ActiveTranslationRequest.Http := TestTranslationTransport
+    ActiveTranslationRequest.StartedAt := A_TickCount
+    SetTimer(CheckTranslationRequest, CONFIG.RequestPollIntervalMs)
+}
+
+ParseTranslationResponse(*)
+{
+    return "translated"
+}
+
+JoinTranslationResults(results)
+{
+    return results[1]
+}
+
+IsTimeoutError(*)
+{
+    return false
+}
+
+ShowTranslationResult(text, pending := false)
+{
+    global TestTranslationResults, ResultGui
+    TestTranslationResults.Push(text)
+    ResultGui.Hidden := false
+}
+
+ShowTranslationError(message)
+{
+    global TestTranslationErrors, ResultGui
+    TestTranslationErrors.Push(message)
+    ResultGui.Hidden := false
 }
 
 AssertInputLayout(dialog, width, height)

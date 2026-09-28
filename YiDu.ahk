@@ -84,6 +84,7 @@ global ResultManualPosition := 0
 global AboutGui := 0
 global PrivacyGui := 0
 global ActiveInputDialog := 0
+global InputDrafts := Map()
 global ActiveTranslationRequest := 0
 global TranslationServiceTrayMenu := 0
 global SpeechVoiceTrayMenu := 0
@@ -948,15 +949,7 @@ EnsureOnlineServicesConsent()
 
 CancelActiveOnlineOperations()
 {
-    global ActiveTranslationRequest, TranslationBusy
-
-    SetTimer(CheckTranslationRequest, 0)
-
-    if IsObject(ActiveTranslationRequest)
-        try ActiveTranslationRequest.Http.Abort()
-
-    ActiveTranslationRequest := 0
-    TranslationBusy := false
+    CancelTranslationRequest()
     StopSpeech()
     StopSpeechWorker()
 }
@@ -1555,11 +1548,14 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
 {
     global CONFIG, SPEECH_VOICES, TRANSLATION_SERVICES, ActiveInputDialog
     global SPEECH_VOICE_GROUPS
+    global InputDrafts
 
     state := {
         Confirmed: false,
         Text: "",
         Pinned: false,
+        DraftKey: selectorType,
+        InitialText: "",
         VoiceOptions: []
     }
 
@@ -1582,7 +1578,9 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
         "xm ym w" . (inputWidth - 20) . " h204 +Multi +WantReturn Background"
             . palette.FieldBackground . " c" . palette.Text
     )
-    inputEdit.Value := A_Clipboard
+    draft := InputDrafts.Has(selectorType) ? InputDrafts[selectorType] : 0
+    inputEdit.Value := IsObject(draft) ? draft.Text : A_Clipboard
+    state.InitialText := inputEdit.Value
     pinButton := inputGui.AddButton("xm y+10 w72 h26", "钉住")
     selectorList := 0
     categoryList := 0
@@ -1696,7 +1694,8 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
     inputGui.Show("w" . inputWidth . " h260")
     ApplyWindowTransparency(inputGui)
     inputEdit.Focus()
-    SendMessage(0x00B1, 0, -1, , "ahk_id " . inputEdit.Hwnd)
+    SendMessage(0x00B1, IsObject(draft) ? draft.SelectionStart : 0,
+        IsObject(draft) ? draft.SelectionEnd : -1, , "ahk_id " . inputEdit.Hwnd)
     RedrawGuiWindow(inputGui)
 
     WinWaitClose("ahk_id " . inputGui.Hwnd)
@@ -1915,7 +1914,7 @@ ToggleInputPinned(state, inputGui, pinButton, *)
 
 SubmitTextInput(state, inputEdit, inputGui, *)
 {
-    global ActiveInputDialog
+    global ActiveInputDialog, InputDrafts
 
     text := Trim(inputEdit.Value)
 
@@ -1927,6 +1926,8 @@ SubmitTextInput(state, inputEdit, inputGui, *)
 
     state.Text := text
     state.Confirmed := true
+    if InputDrafts.Has(state.DraftKey)
+        InputDrafts.Delete(state.DraftKey)
     ActiveInputDialog := 0
     inputGui.Destroy()
 }
@@ -1934,10 +1935,45 @@ SubmitTextInput(state, inputEdit, inputGui, *)
 
 CancelTranslationInput(inputGui, *)
 {
-    global ActiveInputDialog
+    CloseTextInput(inputGui)
+}
 
-    ActiveInputDialog := 0
-    try inputGui.Destroy()
+
+CloseTextInput(inputGui, preserveDraft := false)
+{
+    global ActiveInputDialog, InputDrafts
+
+    previousCritical := A_IsCritical
+    Critical
+    try
+    {
+        if !IsObject(ActiveInputDialog) || ActiveInputDialog.Gui.Hwnd != inputGui.Hwnd
+            return
+
+        dialog := ActiveInputDialog
+        key := dialog.State.DraftKey
+        if preserveDraft
+        {
+            text := dialog.Edit.Value
+            if text !== dialog.State.InitialText || InputDrafts.Has(key)
+            {
+                selection := Buffer(8, 0)
+                SendMessage(0x00B0, selection.Ptr, selection.Ptr + 4,
+                    , "ahk_id " . dialog.Edit.Hwnd)
+                InputDrafts[key] := {
+                    Text: text,
+                    SelectionStart: NumGet(selection, 0, "UInt"),
+                    SelectionEnd: NumGet(selection, 4, "UInt")
+                }
+            }
+        }
+        else if InputDrafts.Has(key)
+            InputDrafts.Delete(key)
+
+        ActiveInputDialog := 0
+        try inputGui.Destroy()
+    }
+    finally Critical(previousCritical)
 }
 
 
@@ -2040,7 +2076,7 @@ CloseInactiveInputWindow(hwnd)
         return
 
     if !WinActive("ahk_id " . hwnd)
-        CancelTranslationInput(ActiveInputDialog.Gui)
+        CloseTextInput(ActiveInputDialog.Gui, true)
 }
 
 
@@ -2322,6 +2358,8 @@ StartTranslationRequest(sourceText, targetLanguage)
 {
     global CONFIG, ActiveTranslationRequest
 
+    Critical
+
     StopSpeech()
     chunks := SplitTranslationText(sourceText)
     ActiveTranslationRequest := {
@@ -2458,6 +2496,8 @@ CheckTranslationRequest()
 {
     global CONFIG, ActiveTranslationRequest
 
+    Critical
+
     if !IsObject(ActiveTranslationRequest)
     {
         SetTimer(CheckTranslationRequest, 0)
@@ -2544,6 +2584,25 @@ IsTranslationResponseReady(requestState)
         return requestState.Http.readyState = 4
 
     return requestState.Http.WaitForResponse(0)
+}
+
+
+CancelTranslationRequest()
+{
+    global TranslationBusy, ActiveTranslationRequest
+
+    previousCritical := A_IsCritical
+    Critical
+    try
+    {
+        SetTimer(CheckTranslationRequest, 0)
+        requestState := ActiveTranslationRequest
+        ActiveTranslationRequest := 0
+        TranslationBusy := false
+        if IsObject(requestState)
+            try requestState.Http.Abort()
+    }
+    finally Critical(previousCritical)
 }
 
 
@@ -3100,6 +3159,7 @@ HideResultWindow(*)
 {
     global ResultGui
 
+    CancelTranslationRequest()
     if IsObject(ResultGui)
         ResultGui.Hide()
 }

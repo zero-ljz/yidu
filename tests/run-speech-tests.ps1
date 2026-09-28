@@ -28,10 +28,15 @@ try {
     $format = Get-SourceBlock "`nFormatHotkey(hotkey)`n" "`nToggleAutostart(*)`n"
     $startup = "`nTestStartup()`n{`n" + (Get-SourceBlock "`nSetupTrayMenu()`nif" "`nSetApplicationIcon()`n{`n") + "`n}`n"
     $inputFunctions = Get-SourceBlock "`nPromptForText(" "`nSetSpeechVoice(voice, *)`n"
+    $inputFunctions = $inputFunctions.Replace('A_Clipboard', 'TestInputClipboard')
+    $inputFunctions = $inputFunctions.Replace('global InputDrafts', 'global InputDrafts, TestInputClipboard')
     $inputFunctions = $inputFunctions.Replace('inputGui.Show("w"', 'inputGui.Show("Hide w"')
     $inputFunctions = $inputFunctions.Replace('WinWaitClose("ahk_id " . inputGui.Hwnd)',
         'SetTimer(InspectTestInput.Bind(selectorType), -1)' + "`n    " + 'WinWaitClose("ahk_id " . inputGui.Hwnd)')
     $inputEvents = Get-SourceBlock "`nToggleInputPinned(" "`nGetTranslationTargetLanguage("
+    $translationStart = Get-SourceBlock "`nStartTranslationRequest(" "`nStartNextTranslationChunk("
+    $translationEvents = Get-SourceBlock "`nRetryCurrentTranslationChunk()`n" "`nBuildTranslationRequest("
+    $hideResult = Get-SourceBlock "`nHideResultWindow(*)`n" "`nCopyCurrentTranslation(*)`n"
     $windowRect = Get-SourceBlock "`nGetPhysicalWindowRect(" "`nMoveWindowPhysical("
     $appearance = Get-SourceBlock "`nGetAppearancePalette()`n" "`nApplyAppearanceToOpenWindows()`n"
     $dropDownTheme = Get-SourceBlock "`nSetPreferredAppColorMode(" "`nApplyAppearanceToExistingWindow("
@@ -41,7 +46,8 @@ try {
     [IO.File]::WriteAllText($testPath, "#Requires AutoHotkey v2.0`n#Warn All, StdOut`n" +
         $settings + $menuGlobals + $globals + $tests + $speech + $worker + $tray +
         $configFunctions + $voiceFunctions + $format + $startup + $inputFunctions +
-        $inputEvents + $windowRect + $appearance + $dropDownTheme + $redraw, [Text.UTF8Encoding]::new($true))
+        $inputEvents + $translationStart + $translationEvents + $hideResult +
+        $windowRect + $appearance + $dropDownTheme + $redraw, [Text.UTF8Encoding]::new($true))
 
     & $AutoHotkeyPath /ErrorStdOut /iLib (Join-Path $testDirectory 'includes.txt') (Join-Path $PSScriptRoot '..\YiDu.ahk') | Write-Output
     if ($LASTEXITCODE -ne 0) { throw 'AutoHotkey source validation failed.' }
