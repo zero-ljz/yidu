@@ -34,6 +34,9 @@ try {
     $inputFunctions = $inputFunctions.Replace('WinWaitClose("ahk_id " . inputGui.Hwnd)',
         'SetTimer(InspectTestInput.Bind(selectorType), -1)' + "`n    " + 'WinWaitClose("ahk_id " . inputGui.Hwnd)')
     $inputEvents = Get-SourceBlock "`nToggleInputPinned(" "`nGetTranslationTargetLanguage("
+    $inputEvents = $inputEvents.Replace('TrayTip(', 'TestTrayTip(')
+    $speakText = Get-SourceBlock "`nSpeakText(readSelection)`n" "`nGetSelectedText()`n"
+    $speakText = $speakText.Replace('TrayTip(', 'TestTrayTip(')
     $translationStart = Get-SourceBlock "`nStartTranslationRequest(" "`nStartNextTranslationChunk("
     $translationEvents = Get-SourceBlock "`nRetryCurrentTranslationChunk()`n" "`nBuildTranslationRequest("
     $hideResult = Get-SourceBlock "`nHideResultWindow(*)`n" "`nCopyCurrentTranslation(*)`n"
@@ -49,7 +52,7 @@ try {
     [IO.File]::WriteAllText($testPath, "#Requires AutoHotkey v2.0`n#Warn All, StdOut`n" +
         $settings + $menuGlobals + $globals + $tests + $speech + $worker + $tray +
         $configFunctions + $voiceFunctions + $format + $startup + $inputFunctions +
-        $inputEvents + $translationStart + $translationEvents + $hideResult +
+        $inputEvents + $speakText + $translationStart + $translationEvents + $hideResult +
         $resultCreate + $resultCommands + $resultResize +
         $windowRect + $appearance + $dropDownTheme + $redraw, [Text.UTF8Encoding]::new($true))
 

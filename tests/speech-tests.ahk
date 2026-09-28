@@ -23,6 +23,9 @@ global ActiveInputDialog := 0
 global InputDrafts := Map()
 global TestInputClipboard := "Alpha"
 global TestDraftScenario := 0
+global TestVoiceScenario := ""
+global TestVoiceSession := 0
+global TestSelectedText := ""
 global TranslationBusy := false
 global ActiveTranslationRequest := 0
 global TestTranslationResults := []
@@ -45,6 +48,8 @@ try
     FileAppend("PASS: linked voice selectors, saved selection and input layout`n", "*")
     TestInputDrafts()
     FileAppend("PASS: input drafts, selection restoration and explicit dismissal`n", "*")
+    TestVoiceInputPlayback()
+    FileAppend("PASS: retained speech input, playback controls, background playback and reopening`n", "*")
     TestTranslationCancellation()
     FileAppend("PASS: translation cancellation, late callbacks and subsequent requests`n", "*")
     TestSplitting()
@@ -184,10 +189,15 @@ InspectTestInput(mode)
 {
     global ActiveInputDialog, CONFIG, CONFIG_PATH, SPEECH_VOICES, SPEECH_VOICE_GROUPS
     global TestInputError, TestTooltipHwnd, SPEECH_SPEEDS, SpeechSpeedTrayMenu
-    global TestDraftScenario
+    global TestDraftScenario, TestVoiceScenario
     Critical
     if !IsObject(ActiveInputDialog)
         return
+    if TestVoiceScenario != ""
+    {
+        InspectVoicePlaybackInput()
+        return
+    }
     if IsObject(TestDraftScenario)
     {
         InspectDraftInput(mode)
@@ -290,8 +300,11 @@ TestInputDrafts()
     global InputDrafts, TestInputClipboard
     InputDrafts.Clear()
     TestInputClipboard := "Alpha"
+    RunDraftInput("translation", {Expected: "Alpha", Action: "blur"})
+    Assert(!InputDrafts.Has("translation"), "Unedited translation clipboard does not become a draft")
+
     RunDraftInput("voice", {Expected: "Alpha", Action: "blur"})
-    Assert(!InputDrafts.Has("voice"), "Unedited clipboard does not become a draft")
+    Assert(InputDrafts["voice"].Text == "Alpha", "Speech input retains unedited clipboard text")
 
     RunDraftInput("voice", {Expected: "Alpha", Text: "alpha", Selection: 2, Action: "blur"})
     Assert(InputDrafts["voice"].Text == "alpha", "Case-only edits preserved")
@@ -306,20 +319,183 @@ TestInputDrafts()
     RunDraftInput("voice", {Expected: "alpha", Text: "", Selection: 0, Action: "blur"})
     Assert(InputDrafts.Has("voice") && InputDrafts["voice"].Text = "", "Empty edited draft retained")
     RunDraftInput("voice", {Expected: "", ExpectedSelection: 0, Action: "cancel"})
-    Assert(!InputDrafts.Has("voice") && InputDrafts.Has("translation"), "Cancel clears only its own draft")
+    Assert(InputDrafts.Has("voice") && InputDrafts["voice"].Text = ""
+        && InputDrafts.Has("translation"), "Closing voice input retains empty text and independent translation draft")
 
     result := RunDraftInput("translation", {Expected: translationText, ExpectedSelection: 4, ExpectedSelectionEnd: 10, Action: "submit"})
     Assert(result == Trim(translationText) && !InputDrafts.Has("translation"), "Submission clears restored draft")
 
     for action in ["cancel", "close", "escape"]
     {
-        RunDraftInput("voice", {Expected: "Alpha", Text: "saved text", Selection: 3, Action: "blur"})
-        RunDraftInput("voice", {Expected: "saved text", ExpectedSelection: 3, Action: action})
-        Assert(!InputDrafts.Has("voice"), "Explicit dismissal clears draft: " . action)
+        RunDraftInput("translation", {Expected: "Alpha", Text: "saved text", Selection: 3, Action: "blur"})
+        RunDraftInput("translation", {Expected: "saved text", ExpectedSelection: 3, Action: action})
+        Assert(!InputDrafts.Has("translation"), "Explicit translation dismissal clears draft: " . action)
     }
-    RunDraftInput("voice", {Expected: "Alpha", Text: "pinned draft", Selection: 5, Action: "pinned"})
+    RunDraftInput("voice", {Expected: "", Text: "pinned draft", Selection: 5, Action: "pinned"})
     Assert(InputDrafts["voice"].Text == "pinned draft", "Pinned draft retained after unpinning and blur")
     InputDrafts.Clear()
+}
+
+TestVoiceInputPlayback()
+{
+    global CONFIG, InputDrafts, TestVoiceSession, SpeechSession, SpeechBusy, ActiveInputDialog
+    global TestSelectedText, TestVoiceScenario, TestInputError
+    savedVoice := CONFIG.SpeechVoice
+    savedSpeed := CONFIG.SpeechSpeed
+    InputDrafts.Clear()
+    try
+    {
+        for scenario in ["start", "reopen-playing", "reopen-paused"]
+        {
+            if scenario = "reopen-paused"
+                ToggleSpeechPause()
+            TestVoiceScenario := scenario
+            TestInputError := ""
+            Critical "Off"
+            SpeakText(false)
+            Critical
+            TestVoiceScenario := ""
+            Assert(TestInputError = "", TestInputError)
+            Assert(!IsObject(ActiveInputDialog), "Speech input can be dismissed")
+            Assert(InputDrafts["voice"].Text == "  next text  ", "Dismissal retains exact editable text")
+            if scenario != "reopen-paused"
+                Assert(SpeechBusy && SpeechSession = TestVoiceSession, "Closing input does not stop or restart background speech")
+        }
+        Assert(!SpeechBusy, "Stopped or completed speech stays stopped after input closes")
+        TestSelectedText := "selected text"
+        SpeakText(true)
+        Assert(!IsObject(ActiveInputDialog) && SpeechSession.Chunks[1] = TestSelectedText, "Selected text starts speech without input window")
+        StopSpeech()
+    }
+    finally
+    {
+        TestVoiceScenario := ""
+        TestSelectedText := ""
+        StopSpeech()
+        if IsObject(ActiveInputDialog)
+            CancelTranslationInput(ActiveInputDialog.Gui)
+        InputDrafts.Clear()
+        SetSpeechVoice(savedVoice)
+        SetSpeechSpeed(savedSpeed)
+    }
+}
+
+AssertVoiceInputControls(dialog, paused := false, busy := true)
+{
+    Assert(IsObject(dialog) && DllCall("IsWindow", "Ptr", dialog.Gui.Hwnd), "Speech input remains alive")
+    Assert(dialog.SubmitButton.Text = (busy ? (paused ? "继续" : "暂停") : "朗读"), "Speech input primary label")
+    Assert(dialog.CancelButton.Text = (busy ? "停止" : "关闭"), "Speech input secondary label")
+    AssertSpeechControls(paused, busy)
+}
+
+DispatchInputButton(button)
+{
+    global ActiveInputDialog
+    buttonId := DllCall("GetDlgCtrlID", "Ptr", button.Hwnd, "Int")
+    PostMessage(0x0111, buttonId, button.Hwnd, , "ahk_id " . ActiveInputDialog.Gui.Hwnd)
+    Critical "Off"
+    Sleep(30)
+    Critical
+}
+
+InspectVoicePlaybackInput()
+{
+    global ActiveInputDialog, TestVoiceScenario, TestVoiceSession, TestInputError
+    global SpeechSession, TestPlaybackCount, TestNotifications, CONFIG
+    try
+    {
+        dialog := ActiveInputDialog
+        if TestVoiceScenario = "start"
+        {
+            AssertVoiceInputControls(dialog, false, false)
+            dialog.Edit.Value := " "
+            DispatchInputButton(dialog.SubmitButton)
+            AssertVoiceInputControls(dialog, false, false)
+            dialog.Edit.Value := "first text"
+            DispatchInputButton(dialog.SubmitButton)
+            AssertVoiceInputControls(dialog)
+            Assert(dialog.Edit.Value == "first text" && !dialog.State.Confirmed, "Starting speech keeps input without submitting on later close")
+            voice := SpeechSession.Voice
+            rate := SpeechSession.Rate
+            CompleteTestChunk()
+            count := TestPlaybackCount
+            dialog.Edit.Value := ""
+            HandleInputKeyDown(0x0D, 0, 0x0100, dialog.Edit.Hwnd)
+            AssertVoiceInputControls(dialog, true)
+            dialog.Edit.Value := "  next text  "
+            SetSpeechVoice("en-US-JennyNeural")
+            SetSpeechSpeed(1.25)
+            Assert(SpeechSession.Chunks[1] = "first text" && SpeechSession.Voice = voice && SpeechSession.Rate = rate,
+                "Edits, voice and rate changes do not alter running speech")
+            DispatchInputButton(dialog.SubmitButton)
+            AssertVoiceInputControls(dialog)
+            Assert(TestPlaybackCount = count, "Input resume does not restart playback")
+            DispatchSpeechMenu("暂停朗读")
+            AssertVoiceInputControls(dialog, true)
+            DispatchSpeechMenu("停止朗读")
+            AssertVoiceInputControls(dialog, false, false)
+            Assert(dialog.Edit.Value == "  next text  ", "Tray stop preserves editable text")
+            DispatchInputButton(dialog.SubmitButton)
+            Assert(SpeechSession.Chunks[1] = "next text" && SpeechSession.Voice = CONFIG.SpeechVoice
+                && SpeechSession.Rate = "+25%", "Next reading uses edited text, voice and speed")
+            CompleteTestChunk()
+            FinishTestPlayback()
+            AssertVoiceInputControls(dialog, false, false)
+            Assert(dialog.Edit.Value == "  next text  ", "Natural completion preserves text")
+
+            DispatchInputButton(dialog.SubmitButton)
+            TestNotifications := []
+            CompleteTestChunk("", "synthetic failure")
+            AssertVoiceInputControls(dialog, false, false)
+            Assert(TestNotifications.Length = 1 && dialog.Edit.Value == "  next text  ", "Synthesis failure permits retry without losing text")
+            DispatchInputButton(dialog.SubmitButton)
+            CompleteTestChunk()
+            TestVoiceSession := SpeechSession
+            SendMessage(0x00B1, 3, 7, , "ahk_id " . dialog.Edit.Hwnd)
+            PostMessage(0x0010, , , , "ahk_id " . dialog.Gui.Hwnd)
+            Critical "Off"
+            Sleep(30)
+            Critical
+        }
+        else
+        {
+            paused := TestVoiceScenario = "reopen-paused"
+            AssertVoiceInputControls(dialog, paused)
+            Assert(dialog.Edit.Value == "  next text  " && SpeechSession = TestVoiceSession,
+                "Reopening restores text and controls existing session")
+            selection := Buffer(8, 0)
+            SendMessage(0x00B0, selection.Ptr, selection.Ptr + 4, , "ahk_id " . dialog.Edit.Hwnd)
+            Assert(NumGet(selection, 0, "UInt") = 3 && NumGet(selection, 4, "UInt") = 7, "Reopening restores selection")
+            if paused
+            {
+                DispatchInputButton(dialog.SubmitButton)
+                AssertVoiceInputControls(dialog)
+                DispatchInputButton(dialog.CancelButton)
+                AssertVoiceInputControls(dialog, false, false)
+                DispatchInputButton(dialog.SubmitButton)
+                CompleteTestChunk()
+                FinishTestPlayback()
+                AssertVoiceInputControls(dialog, false, false)
+                DispatchInputButton(dialog.CancelButton)
+            }
+            else
+                CloseInactiveInputWindow(dialog.Gui.Hwnd)
+        }
+        Assert(!IsObject(ActiveInputDialog), "Dismissal closes speech input only")
+    }
+    catch Error as inputError
+        TestInputError := inputError.Message
+    finally
+    {
+        if IsObject(ActiveInputDialog)
+            CancelTranslationInput(ActiveInputDialog.Gui)
+    }
+}
+
+GetSelectedText()
+{
+    global TestSelectedText
+    return TestSelectedText
 }
 
 RunDraftInput(mode, scenario)
@@ -638,6 +814,7 @@ TestPlaybackQueue()
 {
     global SpeechSession, SpeechBusy, SpeechSynthesisPending, SpeechStartedAt
     global SpeechWorkerRequestPath, TestPlaybackCount, ResultSpeakButton
+    TestPlaybackCount := 0
     SetSpeechSpeed(1.5)
     StartTestSpeech()
     request := StrSplit(Trim(FileRead(SpeechWorkerRequestPath, "UTF-8")), "`n", "`r")

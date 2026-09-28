@@ -639,15 +639,21 @@ UpdateSpeechTrayState()
 
 UpdateSpeechControls()
 {
-    global SpeechBusy, SpeechSession, ResultSpeakButton, ResultPauseButton
+    global SpeechBusy, SpeechSession, ResultSpeakButton, ResultPauseButton, ActiveInputDialog
 
+    paused := IsObject(SpeechSession) && SpeechSession.Paused
     UpdateSpeechTrayState()
     if IsObject(ResultSpeakButton)
         ResultSpeakButton.Text := SpeechBusy ? "停止" : "朗读"
     if IsObject(ResultPauseButton)
     {
-        ResultPauseButton.Text := IsObject(SpeechSession) && SpeechSession.Paused ? "继续" : "暂停"
+        ResultPauseButton.Text := paused ? "继续" : "暂停"
         ResultPauseButton.Enabled := SpeechBusy
+    }
+    if IsObject(ActiveInputDialog) && ActiveInputDialog.State.DraftKey = "voice"
+    {
+        ActiveInputDialog.SubmitButton.Text := SpeechBusy ? (paused ? "继续" : "暂停") : "朗读"
+        ActiveInputDialog.CancelButton.Text := SpeechBusy ? "停止" : "关闭"
     }
 }
 
@@ -1541,7 +1547,10 @@ SpeakText(readSelection)
         sourceText := readSelection ? GetSelectedText() : ""
 
         if sourceText = ""
-            sourceText := PromptForText("输入朗读内容", "朗读", "voice")
+        {
+            PromptForText("输入朗读内容", "朗读", "voice")
+            return
+        }
 
         if sourceText != ""
             StartEdgeSpeech(sourceText, CONFIG.SpeechVoice)
@@ -1658,7 +1667,7 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
         "x" . (inputWidth - 142) . " yp w72 h26 Default",
         submitLabel
     )
-    cancelButton := inputGui.AddButton("x+8 yp w52 h26", "取消")
+    cancelButton := inputGui.AddButton("x+8 yp w52 h26", selectorType = "voice" ? "关闭" : "取消")
 
     ActiveInputDialog := {
         Gui: inputGui,
@@ -1681,7 +1690,7 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
         "Click",
         SubmitTextInput.Bind(state, inputEdit, inputGui)
     )
-    cancelButton.OnEvent("Click", CancelTranslationInput.Bind(inputGui))
+    cancelButton.OnEvent("Click", HandleInputSecondaryButton.Bind(inputGui))
     inputGui.OnEvent("Close", CancelTranslationInput.Bind(inputGui))
     inputGui.OnEvent("Escape", CancelTranslationInput.Bind(inputGui))
     inputGui.OnEvent(
@@ -1724,6 +1733,8 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
         SendMessage(0x0160, Round(220 * dropDownDpi / 96), , , "ahk_id " . selectorList.Hwnd)
     }
 
+    if selectorType = "voice"
+        UpdateSpeechControls()
     inputGui.Show("w" . inputWidth . " h260")
     ApplyWindowTransparency(inputGui)
     inputEdit.Focus()
@@ -1732,7 +1743,8 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
     RedrawGuiWindow(inputGui)
 
     WinWaitClose("ahk_id " . inputGui.Hwnd)
-    ActiveInputDialog := 0
+    if IsObject(ActiveInputDialog) && ActiveInputDialog.State = state
+        ActiveInputDialog := 0
     return state.Confirmed ? state.Text : ""
 }
 
@@ -1947,28 +1959,73 @@ ToggleInputPinned(state, inputGui, pinButton, *)
 
 SubmitTextInput(state, inputEdit, inputGui, *)
 {
-    global ActiveInputDialog, InputDrafts
+    global CONFIG, ActiveInputDialog, InputDrafts, SpeechBusy
 
-    text := Trim(inputEdit.Value)
-
-    if text = ""
+    previousCritical := A_IsCritical
+    Critical
+    try
     {
-        inputEdit.Focus()
-        return
-    }
+        if !IsObject(ActiveInputDialog) || ActiveInputDialog.State != state
+            return
 
-    state.Text := text
-    state.Confirmed := true
-    if InputDrafts.Has(state.DraftKey)
-        InputDrafts.Delete(state.DraftKey)
-    ActiveInputDialog := 0
-    inputGui.Destroy()
+        if state.DraftKey = "voice" && SpeechBusy
+        {
+            ToggleSpeechPause()
+            return
+        }
+
+        text := Trim(inputEdit.Value)
+
+        if text = ""
+        {
+            inputEdit.Focus()
+            return
+        }
+
+        if state.DraftKey = "voice"
+        {
+            try StartEdgeSpeech(text, CONFIG.SpeechVoice)
+            catch Error as err
+                TrayTip("无法朗读：" . err.Message, "译读朗读", 2)
+            return
+        }
+
+        state.Text := text
+        state.Confirmed := true
+        if InputDrafts.Has(state.DraftKey)
+            InputDrafts.Delete(state.DraftKey)
+        ActiveInputDialog := 0
+        inputGui.Destroy()
+    }
+    finally Critical(previousCritical)
+}
+
+
+HandleInputSecondaryButton(inputGui, *)
+{
+    global ActiveInputDialog, SpeechBusy
+
+    previousCritical := A_IsCritical
+    Critical
+    try
+    {
+        if !IsObject(ActiveInputDialog) || ActiveInputDialog.Gui.Hwnd != inputGui.Hwnd
+            return
+        if ActiveInputDialog.State.DraftKey = "voice" && SpeechBusy
+            StopSpeech()
+        else
+            CancelTranslationInput(inputGui)
+    }
+    finally Critical(previousCritical)
 }
 
 
 CancelTranslationInput(inputGui, *)
 {
-    CloseTextInput(inputGui)
+    global ActiveInputDialog
+
+    preserveDraft := IsObject(ActiveInputDialog) && ActiveInputDialog.State.DraftKey = "voice"
+    CloseTextInput(inputGui, preserveDraft)
 }
 
 
@@ -1988,7 +2045,7 @@ CloseTextInput(inputGui, preserveDraft := false)
         if preserveDraft
         {
             text := dialog.Edit.Value
-            if text !== dialog.State.InitialText || InputDrafts.Has(key)
+            if key = "voice" || text !== dialog.State.InitialText || InputDrafts.Has(key)
             {
                 selection := Buffer(8, 0)
                 SendMessage(0x00B0, selection.Ptr, selection.Ptr + 4,
