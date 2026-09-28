@@ -80,7 +80,7 @@ MSIX 清单声明 `runFullTrust`，用于全局快捷键、选区读取、剪贴
 
 ## 朗读测试
 
-安装 AutoHotkey v2 后，可运行离线检查，验证分段、连续播放队列、超时与停止清理：
+安装 AutoHotkey v2 后，可运行离线检查，验证托盘菜单、默认设置、联动音色选择、输入窗口布局、分段、连续播放队列、超时与停止清理：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\run-speech-tests.ps1
@@ -97,17 +97,21 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\run-speech-tests.ps1
 
 输入窗口中按 `Enter` 提交，按 `Shift + Enter` 插入换行。翻译结果窗口支持朗读、复制、置顶和拖动。
 
+朗读输入窗口使用“分类 + 音色”两个联动下拉框，打开时自动定位到上次使用的音色及分类。
+
 托盘菜单可以切换以下选项：
 
 - 翻译服务
-- 语音角色
+- 停止朗读（合成或播放期间可用）
+- 朗读音色（按普通话、方言、粤语、台湾和英语分组）
 - 在鼠标指针处显示结果
-- 外观（跟随系统、深色或浅色）
-- 窗口半透明
+- 外观（主题：跟随系统、深色或浅色；窗口半透明）
 - 开机自启
 - 以管理员身份启动（MSIX 版本不提供）
 - 打开数据目录
 - 关于译读，包括作者、开源仓库、官方网站和反馈邮箱
+
+首次使用会显示在线服务选择窗口；完成选择后，后续启动保持静默。
 
 ## 配置
 
@@ -122,7 +126,7 @@ TranslationService=tencent
 RunAsAdmin=0
 ShowResultAtMouse=1
 ColorTheme=system
-WindowTransparency=1
+WindowTransparency=0
 PrivacyChoiceMade=0
 OnlineServicesConsent=0
 ```
@@ -136,7 +140,7 @@ OnlineServicesConsent=0
 | `RunAsAdmin` | 是否以管理员身份启动，`1` 为开启 |
 | `ShowResultAtMouse` | 是否在鼠标指针附近显示结果，`1` 为开启 |
 | `ColorTheme` | 窗口主题，可选 `system`、`dark` 或 `light`，默认跟随系统 |
-| `WindowTransparency` | 是否启用窗口半透明效果，`1` 为开启，默认开启 |
+| `WindowTransparency` | 是否启用窗口半透明效果，`1` 为开启，新用户默认关闭，已有设置保留 |
 | `PrivacyChoiceMade` | 是否已完成首次在线服务选择，`1` 表示已选择 |
 | `OnlineServicesConsent` | 是否允许向所选第三方发送待翻译或朗读文本，`1` 为允许 |
 

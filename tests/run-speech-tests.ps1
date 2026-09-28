@@ -16,13 +16,32 @@ function Get-SourceBlock([string]$start, [string]$end) {
 }
 
 try {
+    $settings = Get-SourceBlock 'global CONFIG :=' 'global IS_PACKAGED :='
+    $menuGlobals = Get-SourceBlock 'global TranslationServiceTrayMenu :=' 'global SpeechAudioPath :='
     $globals = Get-SourceBlock 'global SpeechAudioPath :=' 'LoadConfig()'
     $speech = Get-SourceBlock "`nStartEdgeSpeech(text, voice)`n" "`nCleanupSpeech(*)`n"
     $speech = $speech.Replace('TrayTip(', 'TestTrayTip(')
     $worker = Get-SourceBlock "`nBuildEdgeSpeechWorkerPowerShell(" "`nGetAppearancePalette()`n"
+    $tray = Get-SourceBlock "`nSetupTrayMenu()`n{`n" "`nShowAboutDialog(*)`n"
+    $configFunctions = Get-SourceBlock "`nLoadConfig()`n{`n" "`nEnsureConfiguredElevation()`n"
+    $voiceFunctions = Get-SourceBlock "`nSetSpeechVoice(voice, *)`n" "`nToggleInputPinned("
+    $format = Get-SourceBlock "`nFormatHotkey(hotkey)`n" "`nToggleAutostart(*)`n"
+    $startup = "`nTestStartup()`n{`n" + (Get-SourceBlock "`nSetupTrayMenu()`nif" "`nSetApplicationIcon()`n{`n") + "`n}`n"
+    $inputFunctions = Get-SourceBlock "`nPromptForText(" "`nSetSpeechVoice(voice, *)`n"
+    $inputFunctions = $inputFunctions.Replace('inputGui.Show("w"', 'inputGui.Show("Hide w"')
+    $inputFunctions = $inputFunctions.Replace('WinWaitClose("ahk_id " . inputGui.Hwnd)',
+        'SetTimer(InspectTestInput.Bind(selectorType), -1)' + "`n    " + 'WinWaitClose("ahk_id " . inputGui.Hwnd)')
+    $inputEvents = Get-SourceBlock "`nToggleInputPinned(" "`nGetTranslationTargetLanguage("
+    $windowRect = Get-SourceBlock "`nGetPhysicalWindowRect(" "`nMoveWindowPhysical("
+    $appearance = Get-SourceBlock "`nGetAppearancePalette()`n" "`nApplyAppearanceToOpenWindows()`n"
+    $dropDownTheme = Get-SourceBlock "`nSetPreferredAppColorMode(" "`nApplyAppearanceToExistingWindow("
+    $redraw = Get-SourceBlock "`nRedrawGuiWindow(" "`nResizeResultWindow("
     $tests = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'speech-tests.ahk'))
     $testPath = Join-Path $testDirectory 'speech-tests.ahk'
-    [IO.File]::WriteAllText($testPath, "#Requires AutoHotkey v2.0`n#Warn All, StdOut`n" + $globals + $tests + $speech + $worker, [Text.UTF8Encoding]::new($true))
+    [IO.File]::WriteAllText($testPath, "#Requires AutoHotkey v2.0`n#Warn All, StdOut`n" +
+        $settings + $menuGlobals + $globals + $tests + $speech + $worker + $tray +
+        $configFunctions + $voiceFunctions + $format + $startup + $inputFunctions +
+        $inputEvents + $windowRect + $appearance + $dropDownTheme + $redraw, [Text.UTF8Encoding]::new($true))
 
     & $AutoHotkeyPath /ErrorStdOut /iLib (Join-Path $testDirectory 'includes.txt') (Join-Path $PSScriptRoot '..\YiDu.ahk') | Write-Output
     if ($LASTEXITCODE -ne 0) { throw 'AutoHotkey source validation failed.' }

@@ -1,16 +1,32 @@
 global ResultSpeakButton := {Text: ""}
 global TestDirectory := A_Args[1]
+global CONFIG_DIRECTORY := TestDirectory
+global CONFIG_PATH := TestDirectory . "\YiDu.ini"
+global IS_PACKAGED := false
+global ShowResultAtMouse := true
 global TestPlaybackMode := "stopped"
 global TestPlaybackCount := 0
 global TestPlaybackError := false
 global TestNotifications := []
 global TestWorkerStops := 0
 global TestConsent := true
+global TestFirstRunCount := 0
+global TestAppearanceUpdates := 0
+global ActiveInputDialog := 0
+global ResultGui := 0
+global TestInputError := ""
+
+DetectHiddenWindows(true)
+OnMessage(0x002B, DrawDropDownItem)
 
 ; Keep timer callbacks out of deterministic state-transition checks.
 Critical
 try
 {
+    TestTraySettings()
+    FileAppend("PASS: tray menus, saved settings and quiet startup`n", "*")
+    TestInputWindows()
+    FileAppend("PASS: linked voice selectors, saved selection and input layout`n", "*")
     TestSplitting()
     FileAppend("PASS: splitting`n", "*")
     TestPlaybackQueue()
@@ -32,6 +48,181 @@ Assert(condition, message)
 {
     if !condition
         throw Error(message)
+}
+
+MenuItemPosition(menu, label)
+{
+    count := DllCall("GetMenuItemCount", "Ptr", menu.Handle, "Int")
+    Loop count
+    {
+        menuTextBuffer := Buffer(512, 0)
+        DllCall("GetMenuStringW", "Ptr", menu.Handle, "UInt", A_Index - 1,
+            "Ptr", menuTextBuffer.Ptr, "Int", 256, "UInt", 0x400)
+        if StrGet(menuTextBuffer, "UTF-16") = label
+            return A_Index - 1
+    }
+    return -1
+}
+
+MenuItemState(menu, label)
+{
+    position := MenuItemPosition(menu, label)
+    Assert(position >= 0, "Missing menu item: " . label)
+    return DllCall("GetMenuState", "Ptr", menu.Handle, "UInt", position, "UInt", 0x400, "UInt")
+}
+
+TestTraySettings()
+{
+    global CONFIG, CONFIG_PATH, SPEECH_VOICES, SpeechVoiceTrayMenu, SpeechVoiceTrayMenus
+    global AppearanceTrayMenu, ColorThemeTrayMenu, TestAppearanceUpdates
+    global TestFirstRunCount, TestNotifications
+    Assert(!CONFIG.WindowTransparency, "New default transparency")
+    Assert(CONFIG.SpeechVoice = "zh-CN-XiaoyiNeural", "Default voice preserved")
+    LoadConfig()
+    Assert(IniRead(CONFIG_PATH, "Settings", "WindowTransparency") = "0", "New config defaults")
+    IniWrite(1, CONFIG_PATH, "Settings", "WindowTransparency")
+    IniWrite("zh-HK-HiuGaaiNeural", CONFIG_PATH, "Settings", "SpeechVoice")
+    IniWrite("dark", CONFIG_PATH, "Settings", "ColorTheme")
+    IniWrite(1, CONFIG_PATH, "Settings", "PrivacyChoiceMade")
+    LoadConfig()
+    Assert(CONFIG.WindowTransparency && CONFIG.ColorTheme = "dark", "Saved appearance preserved")
+    Assert(CONFIG.SpeechVoice = "zh-HK-HiuGaaiNeural", "Saved voice preserved")
+    TestStartup()
+    Assert(TestNotifications.Length = 0 && TestFirstRunCount = 0, "Existing user quiet startup")
+    Assert(MenuItemState(A_TrayMenu, "停止朗读") & 3, "Idle stop item disabled")
+    Assert(MenuItemPosition(A_TrayMenu, "语音角色") = -1, "Old voice menu removed")
+    Assert(MenuItemPosition(A_TrayMenu, "窗口半透明") = -1, "Transparency moved into appearance")
+    Assert(MenuItemPosition(A_TrayMenu, "朗读音色") >= 0, "Voice root menu")
+    Assert(SpeechVoiceTrayMenus.Count = 5, "Five voice groups")
+    for item in SPEECH_VOICES
+        Assert(MenuItemPosition(SpeechVoiceTrayMenus[item.Group], item.Label) >= 0, "Voice assigned to group")
+    Assert(MenuItemState(SpeechVoiceTrayMenu, "粤语") & 8, "Saved voice group checked")
+    SetSpeechVoice("en-US-GuyNeural")
+    Assert(!(MenuItemState(SpeechVoiceTrayMenu, "粤语") & 8), "Old group unchecked")
+    Assert(MenuItemState(SpeechVoiceTrayMenu, "英语") & 8, "New group checked")
+    Assert(MenuItemState(SpeechVoiceTrayMenus["英语"], "Guy · 英语男声") & 8, "New voice checked")
+    Assert(IniRead(CONFIG_PATH, "Settings", "SpeechVoice") = "en-US-GuyNeural", "Voice choice persisted")
+    Assert(MenuItemState(ColorThemeTrayMenu, "深色") & 8, "Saved theme checked")
+    SetColorTheme("light")
+    Assert(MenuItemState(ColorThemeTrayMenu, "浅色") & 8, "Theme selection checked")
+    Assert(!(MenuItemState(ColorThemeTrayMenu, "深色") & 8), "Previous theme unchecked")
+    Assert(MenuItemState(AppearanceTrayMenu, "窗口半透明") & 8, "Saved transparency checked")
+    ToggleWindowTransparency()
+    Assert(!CONFIG.WindowTransparency && !(MenuItemState(AppearanceTrayMenu, "窗口半透明") & 8), "Transparency toggle")
+    Assert(IniRead(CONFIG_PATH, "Settings", "WindowTransparency") = "0", "Transparency persisted")
+    Assert(TestAppearanceUpdates = 2, "Appearance applied to open windows")
+    CONFIG.PrivacyChoiceMade := false
+    TestStartup()
+    Critical "Off"
+    Sleep(30)
+    Critical
+    Assert(TestFirstRunCount = 1, "First-run consent window retained")
+    CONFIG.PrivacyChoiceMade := true
+    TestStartup()
+    Assert(TestFirstRunCount = 1 && TestNotifications.Length = 0, "Later startup remains quiet")
+}
+
+TestInputWindows()
+{
+    global CONFIG, TestInputError
+    for mode in ["voice", "voice", "translation", ""]
+    {
+        TestInputError := ""
+        Critical "Off"
+        result := PromptForText("Input test", "朗读", mode)
+        Critical
+        Assert(TestInputError = "", TestInputError)
+        Assert(result = "", "Input cancellation")
+    }
+}
+
+InspectTestInput(mode)
+{
+    global ActiveInputDialog, CONFIG, CONFIG_PATH, SPEECH_VOICES, SPEECH_VOICE_GROUPS
+    global TestInputError
+    Critical
+    if !IsObject(ActiveInputDialog)
+        return
+    clientRect := Buffer(16, 0)
+    DllCall("GetClientRect", "Ptr", ActiveInputDialog.Gui.Hwnd, "Ptr", clientRect.Ptr)
+    if NumGet(clientRect, 8, "Int") < 200
+        return
+    try
+    {
+        dialog := ActiveInputDialog
+        Assert(IsObject(dialog), "Input window initialized")
+        if mode = "voice"
+        {
+            savedIndex := GetSpeechVoiceIndex(CONFIG.SpeechVoice)
+            Assert(dialog.CategoryList.Text = SPEECH_VOICES[savedIndex].Group, "Saved category restored")
+            Assert(dialog.State.VoiceOptions[dialog.SelectorList.Value].Voice = CONFIG.SpeechVoice, "Saved voice restored")
+            for group in SPEECH_VOICE_GROUPS
+            {
+                dialog.CategoryList.Choose(group)
+                ChangeSpeechVoiceGroup(dialog.State, dialog.SelectorList, dialog.CategoryList)
+                Assert(dialog.State.VoiceOptions.Length > 0, "Category has voices")
+                count := SendMessage(0x0146, , , , "ahk_id " . dialog.SelectorList.Hwnd)
+                Assert(count = dialog.State.VoiceOptions.Length, "Filtered list count")
+                for index, item in dialog.State.VoiceOptions
+                {
+                    Assert(item.Group = group, "Only selected category voices shown")
+                    dialog.SelectorList.Choose(index)
+                    ChangeSpeechVoice(dialog.State, dialog.SelectorList)
+                    Assert(CONFIG.SpeechVoice = item.Voice, "Filtered selection maps to correct voice")
+                    Assert(IniRead(CONFIG_PATH, "Settings", "SpeechVoice") = item.Voice, "Filtered choice persisted")
+                }
+            }
+        }
+        else
+        {
+            Assert(!IsObject(dialog.CategoryList), "Other modes have no category selector")
+            if mode = "translation"
+            {
+                dialog.SelectorList.Choose(2)
+                ChangeTranslationService(dialog.SelectorList)
+                Assert(CONFIG.TranslationService = "youdao", "Translation selector still works")
+            }
+            else
+                Assert(!IsObject(dialog.SelectorList), "Plain input has no selectors")
+        }
+
+        minimumWidth := mode = "voice" ? 560 : (mode = "translation" ? 300 : 360)
+        for size in [{Width: minimumWidth, Height: 200}, {Width: 800, Height: 380}]
+        {
+            ResizeInputWindow(dialog.Edit, dialog.PinButton, dialog.SelectorList,
+                dialog.CategoryList, dialog.SubmitButton, dialog.CancelButton,
+                dialog.Gui, 0, size.Width, size.Height)
+            AssertInputLayout(dialog, size.Width, size.Height)
+        }
+    }
+    catch Error as inputError
+        TestInputError := inputError.Message
+    finally
+    {
+        if IsObject(ActiveInputDialog)
+            CancelTranslationInput(ActiveInputDialog.Gui)
+    }
+}
+
+AssertInputLayout(dialog, width, height)
+{
+    dialog.Edit.GetPos(, &editY, , &editHeight)
+    controls := [dialog.PinButton]
+    if IsObject(dialog.CategoryList)
+        controls.Push(dialog.CategoryList)
+    if IsObject(dialog.SelectorList)
+        controls.Push(dialog.SelectorList)
+    controls.Push(dialog.SubmitButton, dialog.CancelButton)
+    previousRight := 0
+    for control in controls
+    {
+        control.GetPos(&controlX, &controlY, &controlWidth, &controlHeight)
+        Assert(controlX >= previousRight + 6, "Input row controls overlap")
+        Assert(controlX + controlWidth <= width - 10, "Input row fits window width")
+        Assert(controlY >= editY + editHeight + 6, "Input row overlaps text box")
+        Assert(controlY + controlHeight <= height - 8, "Input row fits window height")
+        previousRight := controlX + controlWidth
+    }
 }
 
 RepeatText(text, count)
@@ -77,6 +268,7 @@ StartTestSpeech(length := 1000)
     TestPlaybackError := false
     TestNotifications := []
     StartEdgeSpeech(RepeatText("字", length), "zh-CN-XiaoyiNeural")
+    Assert(!(MenuItemState(A_TrayMenu, "停止朗读") & 3), "Stop item enabled during synthesis")
 }
 
 CompleteTestChunk(audio := "audio", errorMessage := "")
@@ -126,6 +318,7 @@ TestPlaybackQueue()
     FinishTestPlayback()
     Assert(!SpeechBusy && !IsObject(SpeechSession), "Final playback finishes session")
     Assert(ResultSpeakButton.Text = "朗读", "Button reset")
+    Assert(MenuItemState(A_TrayMenu, "停止朗读") & 3, "Stop item disabled after completion")
 }
 
 TestFailuresAndCancellation()
@@ -198,6 +391,70 @@ TestFailuresAndCancellation()
     StartEdgeSpeech("No consent.", "en-US-JennyNeural")
     Assert(!SpeechBusy && !SpeechSynthesisPending, "Consent respected")
     TestConsent := true
+
+    StartTestSpeech()
+    CompleteTestChunk()
+    playingPath := SpeechSession.PlayingChunk.AudioPath
+    commandId := DllCall("GetMenuItemID", "Ptr", A_TrayMenu.Handle,
+        "Int", MenuItemPosition(A_TrayMenu, "停止朗读"), "UInt")
+    Assert(DllCall("PostMessageW", "Ptr", A_ScriptHwnd, "UInt", 0x111,
+        "UPtr", commandId, "Ptr", 0), "Dispatch tray stop command")
+    Critical "Off"
+    Sleep(50)
+    Critical
+    Assert(!SpeechBusy && !FileExist(playingPath), "Tray stop callback cancels playback and prefetch")
+    Assert(MenuItemState(A_TrayMenu, "停止朗读") & 3, "Tray stop callback disables item")
+}
+
+TranslateFromTray(*)
+{
+}
+
+QuoteCommandArgument(value)
+{
+    return Chr(34) . value . Chr(34)
+}
+
+SpeakFromTray(*)
+{
+}
+
+ToggleResultAtMouse(*)
+{
+}
+
+ToggleAutostart(*)
+{
+}
+
+ToggleRunAsAdmin(*)
+{
+}
+
+IsAutostartEnabled()
+{
+    return false
+}
+
+ShowOnlineServicesPrivacyDialog(*)
+{
+}
+
+ShowAboutDialog(*)
+{
+}
+
+OpenOnlineServicesPrivacyDialog(firstRun)
+{
+    global TestFirstRunCount
+    Assert(firstRun, "First-run dialog argument")
+    TestFirstRunCount += 1
+}
+
+ApplyAppearanceToOpenWindows()
+{
+    global TestAppearanceUpdates
+    TestAppearanceUpdates += 1
 }
 
 EnsureOnlineServicesConsent()
