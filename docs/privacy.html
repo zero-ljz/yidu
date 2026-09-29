@@ -56,7 +56,7 @@
         <p class="legal-summary">本政策说明译读 Windows 应用及官方网站会处理哪些数据、为何处理，以及你可以如何控制这些数据。</p>
         <p class="legal-meta">
           <span>生效日期：2026 年 8 月 29 日</span>
-          <span>最近更新：2026 年 8 月 29 日</span>
+          <span>最近更新：2026 年 9 月 29 日</span>
         </p>
       </div>
     </section>
@@ -112,7 +112,7 @@
                   </tr>
                   <tr>
                     <td>在线朗读</td>
-                    <td>待朗读文本和所选音色标识</td>
+                    <td>待朗读文本、所选音色标识和语速参数</td>
                     <td>Microsoft 在线语音服务</td>
                     <td>合成并返回音频</td>
                   </tr>
@@ -130,7 +130,7 @@
               <li><strong>腾讯翻译：</strong>翻译文本会发送至腾讯相关翻译接口。参见<a href="https://privacy.qq.com/policy/tencent-privacypolicy" target="_blank" rel="noreferrer">腾讯隐私保护平台</a>。</li>
               <li><strong>有道翻译：</strong>翻译文本会发送至有道翻译接口。参见<a href="https://shared.ydstatic.com/dict/market/youdaoInc-v2.0/index.html" target="_blank" rel="noreferrer">网易有道隐私政策</a>。</li>
               <li><strong>Google 翻译：</strong>翻译文本会发送至 Google 翻译接口。参见<a href="https://policies.google.com/privacy?hl=zh-CN" target="_blank" rel="noreferrer">Google 隐私权政策</a>。</li>
-              <li><strong>Microsoft 在线语音：</strong>待朗读文本及音色标识会发送至 Microsoft Edge 在线语音服务。参见<a href="https://privacy.microsoft.com/zh-cn/privacystatement" target="_blank" rel="noreferrer">Microsoft 隐私声明</a>。</li>
+              <li><strong>Microsoft 在线语音：</strong>待朗读文本、音色标识及语速参数会发送至 Microsoft Edge 在线语音服务。参见<a href="https://privacy.microsoft.com/zh-cn/privacystatement" target="_blank" rel="noreferrer">Microsoft 隐私声明</a>。</li>
             </ul>
             <p>请勿使用译读处理不适合提供给上述第三方的密码、身份信息、商业秘密、医疗信息或其他敏感内容。</p>
           </section>
@@ -138,7 +138,10 @@
           <section id="local-data" class="legal-section">
             <h2>4. 本地存储与临时文件</h2>
             <h3>应用配置</h3>
-            <p>源码版和绿色版在程序目录的 <code>YiDu.ini</code> 中保存设置，MSIX 版本则使用 <code>%APPDATA%\YiDu\YiDu.ini</code>。其中包含快捷键、翻译服务、语音角色、窗口主题与透明效果、在线服务授权、管理员启动和结果显示位置等设置，不包含翻译历史或账户信息，也不会由译读发送给开发者。</p>
+            <p>源码版和绿色版在程序目录的 <code>YiDu.ini</code> 中保存设置，MSIX 版本则使用 <code>%APPDATA%\YiDu\YiDu.ini</code>。其中包含快捷键、翻译服务、朗读音色与速度、窗口主题与透明效果、在线服务授权、管理员启动和结果显示位置等设置，不包含翻译历史或账户信息，也不会由译读发送给开发者。</p>
+
+            <h3>输入草稿</h3>
+            <p>翻译与朗读输入窗口失焦收起时，会分别在本次运行的内存中保留草稿文本和光标位置，便于重新打开后继续编辑。翻译草稿在提交或主动取消后清除；朗读文本在完成、停止或关闭输入窗口后仍可保留，供再次朗读。草稿不会写入配置文件，退出应用后清除；只有你主动提交翻译或朗读时，相应文本才会发送至第三方在线服务。</p>
 
             <h3>剪贴板</h3>
             <p>为读取当前选中的文本，译读会在本机临时访问剪贴板，并尽力恢复原有内容。只有当你主动选择“复制结果”时，翻译结果才会写入剪贴板。</p>
