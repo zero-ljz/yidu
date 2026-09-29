@@ -1,3 +1,7 @@
+param(
+    [switch]$Force
+)
+
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
@@ -10,8 +14,19 @@ if (-not (Test-Path -LiteralPath $sourcePath)) {
 }
 
 New-Item -ItemType Directory -Force -Path $assetsPath | Out-Null
+$inputWriteTime = @(
+    (Get-Item -LiteralPath $sourcePath).LastWriteTimeUtc
+    (Get-Item -LiteralPath $PSCommandPath).LastWriteTimeUtc
+) | Sort-Object -Descending | Select-Object -First 1
 
 function Write-Logo([string]$Name, [int]$Width, [int]$Height, [int]$LogoSize) {
+    $outputPath = Join-Path $assetsPath $Name
+    if (-not $Force -and (Test-Path -LiteralPath $outputPath -PathType Leaf) -and
+        (Get-Item -LiteralPath $outputPath).LastWriteTimeUtc -ge $inputWriteTime) {
+        Write-Host "Reusing MSIX asset: $Name"
+        return
+    }
+
     $source = [System.Drawing.Image]::FromFile($sourcePath)
     try {
         $bitmap = New-Object System.Drawing.Bitmap($Width, $Height, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
@@ -29,7 +44,8 @@ function Write-Logo([string]$Name, [int]$Width, [int]$Height, [int]$LogoSize) {
             finally {
                 $graphics.Dispose()
             }
-            $bitmap.Save((Join-Path $assetsPath $Name), [System.Drawing.Imaging.ImageFormat]::Png)
+            $bitmap.Save($outputPath, [System.Drawing.Imaging.ImageFormat]::Png)
+            Write-Host "Generated MSIX asset: $Name"
         }
         finally {
             $bitmap.Dispose()

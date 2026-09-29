@@ -60,7 +60,7 @@ cd yidu
 powershell -NoProfile -ExecutionPolicy Bypass -File .\packaging\msix\build-msix.ps1
 ```
 
-脚本会从 `YiDu.ahk` 的 Ahk2Exe 指令读取版本，编译主程序和开机启动任务组件，并在 `release` 目录生成经过开发证书签名的 `.msix` 与对应 `.cer`。首次旁加载可运行：
+脚本会从 `YiDu.ahk` 的 Ahk2Exe 指令读取版本，编译主程序和开机启动任务组件，并在 `release` 目录生成经过开发证书签名的 `.msix` 与对应 `.cer`。MSIX 图标仅在缺失，或原图 `assets/yidu-icon.png`、生成脚本比输出图片更新时重新生成；需要强制更新时可运行 `.\packaging\msix\generate-assets.ps1 -Force`。首次旁加载可运行：
 
 ```powershell
 .\packaging\msix\install-development-msix.ps1 `
