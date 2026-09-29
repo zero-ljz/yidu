@@ -1,6 +1,7 @@
 param(
     [string]$AutoHotkeyPath = (Join-Path $env:ProgramFiles 'AutoHotkey\v2\AutoHotkey64.exe'),
-    [switch]$Online
+    [switch]$Online,
+    [switch]$TextButtons
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,6 +36,9 @@ try {
     $resultPositionAction = Get-SourceBlock "`nToggleResultAtMouse(*)`n" "`nTranslateFromHotkey(*)`n"
     $startup = "`nTestStartup()`n{`n" + (Get-SourceBlock "`nSetupTrayMenu()`nif" "`nSetApplicationIcon()`n{`n") + "`n}`n"
     $inputFunctions = Get-SourceBlock "`nPromptForText(" "`nSetSpeechVoice(voice, *)`n"
+    if ($TextButtons) {
+        $inputFunctions = $inputFunctions.Replace('useIcons := HasInputIconFont()', 'useIcons := false')
+    }
     $inputFunctions = $inputFunctions.Replace('A_Clipboard', 'TestInputClipboard')
     $inputFunctions = $inputFunctions.Replace('global InputDrafts', 'global InputDrafts, TestInputClipboard')
     $inputFunctions = $inputFunctions.Replace('inputGui.Show("w"', 'inputGui.Show("Hide w"')
@@ -48,6 +52,9 @@ try {
     $translationEvents = Get-SourceBlock "`nRetryCurrentTranslationChunk()`n" "`nBuildTranslationRequest("
     $hideResult = Get-SourceBlock "`nHideResultWindow(*)`n" "`nCopyCurrentTranslation(*)`n"
     $resultCreate = Get-SourceBlock "`nCreateResultWindow()`n" "`nHideResultWindow(*)`n"
+    if ($TextButtons) {
+        $resultCreate = $resultCreate.Replace('useIcons := HasInputIconFont()', 'useIcons := false')
+    }
     $resultCommands = Get-SourceBlock "`nCopyCurrentTranslation(*)`n" "`nStartEdgeSpeech(text, voice)`n"
     $resultResize = Get-SourceBlock "`nResizeResultWindow(" "`nclass JsonParser`n"
     $windowRect = Get-SourceBlock "`nGetPhysicalWindowRect(" "`nMoveWindowPhysical("

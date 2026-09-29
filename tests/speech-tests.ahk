@@ -4,6 +4,7 @@ global ResultEdit := 0
 global ResultPinButton := 0
 global ResultCopyButton := 0
 global ResultCloseButton := 0
+global ResultIconButtons := Map()
 global ResultPinned := false
 global TestDirectory := A_Args[1]
 global CONFIG_DIRECTORY := TestDirectory
@@ -337,6 +338,17 @@ InspectTestInput(mode)
         dialog := ActiveInputDialog
         Assert(IsObject(dialog), "Input window initialized")
         Assert(!dialog.HasOwnProp("CategoryList"), "Input window has no category selector")
+        Assert(!HasInputIconFont("YiDu Missing Icon Font"), "Missing icon font falls back to text")
+        if dialog.IconButtons.Count
+        {
+            Assert(dialog.IconButtons.Count = (mode = "voice" ? 3 : 2), "Input icon buttons initialized")
+            AssertInputIcon(dialog, dialog.PinButton, 0xE718, "钉住")
+            AssertInputIcon(dialog, dialog.CancelButton, 0xE711, mode = "voice" ? "关闭" : "取消")
+            ToggleInputPinned(dialog.State, dialog.Gui, dialog.PinButton)
+            AssertInputIcon(dialog, dialog.PinButton, 0xE77A, "取消钉住")
+            ToggleInputPinned(dialog.State, dialog.Gui, dialog.PinButton)
+            AssertInputIcon(dialog, dialog.PinButton, 0xE718, "钉住")
+        }
         if mode = "voice"
         {
             Assert(dialog.SpeedButton.Text = GetSpeechSpeedLabel(), "Saved speed restored on button")
@@ -394,7 +406,7 @@ InspectTestInput(mode)
                 Assert(!IsObject(dialog.SelectorList), "Plain input has no selectors")
         }
 
-        minimumWidth := mode = "voice" ? 524 : (mode = "translation" ? 300 : 360)
+        minimumWidth := mode = "voice" ? (dialog.IconButtons.Count ? 412 : 524) : (mode = "translation" ? 300 : 360)
         if mode = "voice"
         {
             minMaxInfo := Buffer(40, 0)
@@ -518,8 +530,36 @@ AssertVoiceInputControls(dialog, paused := false, busy := true)
     Assert(IsObject(dialog) && DllCall("IsWindow", "Ptr", dialog.Gui.Hwnd), "Speech input remains alive")
     Assert(dialog.SubmitButton.Text = (busy ? (paused ? "继续" : "暂停") : "朗读"), "Speech input primary label")
     Assert(dialog.CancelButton.Text = (busy ? "停止" : "关闭"), "Speech input secondary label")
+    if dialog.IconButtons.Count
+    {
+        AssertInputIcon(dialog, dialog.SubmitButton, busy ? (paused ? 0xE768 : 0xE769) : 0xE995,
+            busy ? (paused ? "继续" : "暂停") : "朗读")
+        AssertInputIcon(dialog, dialog.CancelButton, busy ? 0xE71A : 0xE711, busy ? "停止" : "关闭")
+    }
     AssertSpeechControls(paused, busy)
 }
+
+
+AssertInputIcon(dialog, control, glyph, label)
+{
+    button := dialog.IconButtons[control.Hwnd]
+    Assert(button.Glyph = glyph, "Input icon follows action: " . label)
+    Assert(control.Text = label, "Native accessible caption retained: " . label)
+    Assert(IsObject(button.Tooltip) && StrGet(button.Tooltip.TextBuffer, "UTF-16") = label,
+        "Input icon tooltip follows action: " . label)
+    nativeText := Buffer(512, 0)
+    toolInfo := Buffer(A_PtrSize = 8 ? 72 : 48, 0)
+    NumPut("UInt", toolInfo.Size, "UInt", 0x11, toolInfo)
+    NumPut("Ptr", dialog.Gui.Hwnd, "UPtr", control.Hwnd, toolInfo, 8)
+    NumPut("Ptr", nativeText.Ptr, toolInfo, 8 + (3 * A_PtrSize) + 16)
+    DllCall("SendMessageW", "Ptr", button.Tooltip.Hwnd, "UInt", 0x0438,
+        "Ptr", 0, "Ptr", toolInfo.Ptr)
+    Assert(StrGet(nativeText, "UTF-16") = label, "Native tooltip text updated: " . label)
+    control.GetPos(, , &width, &height)
+    Assert(width = 28 && height = 26, "Input icon dimensions stay compact and fixed")
+    Assert((ControlGetStyle(control) & 0xF) = 0xB, "Native icon button uses owner drawing: " . ControlGetStyle(control))
+}
+
 
 DispatchInputButton(button)
 {
@@ -985,12 +1025,19 @@ TestPlaybackQueue()
 AssertSpeechControls(paused := false, busy := true)
 {
     global ResultPauseButton, ResultSpeakButton, SpeechBusy, SpeechSession
+    global ResultGui, ResultIconButtons
     pauseLabel := paused ? "继续朗读" : "暂停朗读"
     Assert(SpeechBusy = busy, "Speech busy state")
     Assert(!!(MenuItemState(A_TrayMenu, pauseLabel) & 3) = !busy, "Pause menu availability")
     Assert(!!(MenuItemState(A_TrayMenu, "停止朗读") & 3) = !busy, "Stop menu availability")
     Assert(ResultPauseButton.Text = (paused ? "继续" : "暂停") && ResultPauseButton.Enabled = busy, "Result pause state")
     Assert(ResultSpeakButton.Text = (busy ? "停止" : "朗读"), "Result stop state")
+    if ResultIconButtons.Count
+    {
+        resultDialog := {Gui: ResultGui, IconButtons: ResultIconButtons}
+        AssertInputIcon(resultDialog, ResultSpeakButton, busy ? 0xE71A : 0xE995, busy ? "停止" : "朗读")
+        AssertInputIcon(resultDialog, ResultPauseButton, paused ? 0xE768 : 0xE769, paused ? "继续" : "暂停")
+    }
     if busy
         Assert(SpeechSession.Paused = paused, "Session pause state")
 }
@@ -1126,11 +1173,33 @@ TestResultSpeechControls()
 {
     global ResultGui, ResultEdit, ResultPinButton, ResultPauseButton, ResultSpeakButton
     global ResultCopyButton, ResultCloseButton, SpeechSession, SpeechMciAlias
+    global ResultIconButtons, ResultPinned
 
+    savedClipboard := ClipboardAll()
+    tooltipWindows := []
     CreateResultWindow()
     try
     {
         ResultGui.Show("Hide w400 h200")
+        resultDialog := {Gui: ResultGui, IconButtons: ResultIconButtons}
+        for hwnd, button in ResultIconButtons
+            tooltipWindows.Push(button.Tooltip.Hwnd)
+        if ResultIconButtons.Count
+        {
+            Assert(ResultIconButtons.Count = 5, "Result window initializes all five icons")
+            AssertInputIcon(resultDialog, ResultPinButton, 0xE718, "钉住")
+            AssertInputIcon(resultDialog, ResultCopyButton, 0xE8C8, "复制结果")
+            AssertInputIcon(resultDialog, ResultCloseButton, 0xE711, "关闭")
+        }
+        ToggleResultPinned()
+        Assert(ResultPinned, "Result pin enabled")
+        if ResultIconButtons.Count
+        {
+            AssertInputIcon(resultDialog, ResultPinButton, 0xE77A, "取消钉住")
+            Assert(ResultIconButtons[ResultPinButton.Hwnd].Selected, "Result pin highlights selected state")
+        }
+        ToggleResultPinned()
+        Assert(!ResultPinned, "Result pin disabled")
         for size in [{Width: 400, Height: 128}, {Width: 800, Height: 380}]
         {
             ResizeResultWindow(ResultEdit, ResultPinButton, ResultPauseButton, ResultSpeakButton,
@@ -1145,6 +1214,14 @@ TestResultSpeechControls()
         }
         AssertSpeechControls(false, false)
         ResultEdit.Value := "result text"
+        DispatchResultButton(ResultCopyButton)
+        Assert(A_Clipboard = "result text" && ResultCopyButton.Text = "已复制", "Result copy writes clipboard and confirms success")
+        if ResultIconButtons.Count
+            AssertInputIcon(resultDialog, ResultCopyButton, 0xE73E, "已复制")
+        RestoreCopyButtonFeedback()
+        Assert(ResultCopyButton.Text = "复制结果", "Result copy feedback restores caption")
+        if ResultIconButtons.Count
+            AssertInputIcon(resultDialog, ResultCopyButton, 0xE8C8, "复制结果")
         DispatchResultButton(ResultSpeakButton)
         AssertSpeechControls()
         CompleteTestChunk()
@@ -1163,11 +1240,18 @@ TestResultSpeechControls()
         DispatchResultButton(ResultPauseButton)
         DispatchResultButton(ResultSpeakButton)
         AssertSpeechControls(false, false)
+        DispatchResultButton(ResultCloseButton)
+        Assert(!DllCall("IsWindowVisible", "Ptr", ResultGui.Hwnd), "Result icon close hides window")
     }
     finally
     {
         StopSpeech()
+        SetTimer(RestoreCopyButtonFeedback, 0)
+        A_Clipboard := savedClipboard
         ResultGui.Destroy()
+        for tooltipHwnd in tooltipWindows
+            Assert(!DllCall("IsWindow", "Ptr", tooltipHwnd), "Result icon tooltips destroyed with window")
+        ResultIconButtons := Map()
         ResultGui := 0
         ResultEdit := 0
         ResultPinButton := 0

@@ -78,6 +78,7 @@ global ResultSpeakButton := 0
 global ResultPauseButton := 0
 global ResultCopyButton := 0
 global ResultCloseButton := 0
+global ResultIconButtons := Map()
 global ResultPinned := false
 global ShowResultAtMouse := true
 global ResultManualPosition := 0
@@ -630,16 +631,22 @@ UpdateSpeechControls()
     paused := IsObject(SpeechSession) && SpeechSession.Paused
     UpdateSpeechTrayState()
     if IsObject(ResultSpeakButton)
+    {
         ResultSpeakButton.Text := SpeechBusy ? "停止" : "朗读"
+        UpdateIconButton(ResultSpeakButton, SpeechBusy ? 0xE71A : 0xE995)
+    }
     if IsObject(ResultPauseButton)
     {
         ResultPauseButton.Text := paused ? "继续" : "暂停"
         ResultPauseButton.Enabled := SpeechBusy
+        UpdateIconButton(ResultPauseButton, paused ? 0xE768 : 0xE769)
     }
     if IsObject(ActiveInputDialog) && ActiveInputDialog.State.DraftKey = "voice"
     {
         ActiveInputDialog.SubmitButton.Text := SpeechBusy ? (paused ? "继续" : "暂停") : "朗读"
         ActiveInputDialog.CancelButton.Text := SpeechBusy ? "停止" : "关闭"
+        UpdateIconButton(ActiveInputDialog.SubmitButton, SpeechBusy ? (paused ? 0xE768 : 0xE769) : 0xE995)
+        UpdateIconButton(ActiveInputDialog.CancelButton, SpeechBusy ? 0xE71A : 0xE711)
     }
 }
 
@@ -1587,10 +1594,15 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
     }
 
     palette := GetAppearancePalette()
+    useIcons := HasInputIconFont()
+    pinWidth := useIcons ? 28 : 72
+    submitWidth := useIcons && selectorType = "voice" ? 28 : 72
+    cancelWidth := useIcons ? 28 : 52
+    rightWidth := submitWidth + cancelWidth + 18
     minimumWidth := selectorType = "translation"
         ? 300
-        : (selectorType = "voice" ? 524 : 360)
-    inputWidth := selectorType = "voice" ? 524 : 460
+        : (selectorType = "voice" ? (useIcons ? 412 : 524) : 360)
+    inputWidth := Max(460, minimumWidth)
     inputGui := Gui(
         "+Resize -MinimizeBox -MaximizeBox +MinSize"
             . minimumWidth . "x200",
@@ -1608,7 +1620,7 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
     draft := InputDrafts.Has(selectorType) ? InputDrafts[selectorType] : 0
     inputEdit.Value := IsObject(draft) ? draft.Text : A_Clipboard
     state.InitialText := inputEdit.Value
-    pinButton := inputGui.AddButton("xm y+10 w72 h26", "钉住")
+    pinButton := inputGui.AddButton("xm y+10 w" . pinWidth . " h26", "钉住")
     selectorList := 0
     speedButton := 0
     speedTooltip := 0
@@ -1621,9 +1633,9 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
             voiceLabels.Push(item.Label)
 
         selectorList := inputGui.AddDropDownList(
-            "x90 yp w220 +0x210", voiceLabels
+            "x" . (inputWidth - rightWidth - 292) . " yp w220 +0x210", voiceLabels
         )
-        speedButton := inputGui.AddButton("x318 yp w56 h26", GetSpeechSpeedLabel())
+        speedButton := inputGui.AddButton("x" . (inputWidth - rightWidth - 64) . " yp w56 h26", GetSpeechSpeedLabel())
         speedButton.OnEvent("Click", CycleSpeechSpeed)
         speedTooltip := CreateControlTooltip(inputGui, speedButton, "朗读速度，点击切换")
         selectorList.Choose(GetSpeechVoiceIndex(CONFIG.SpeechVoice))
@@ -1637,7 +1649,7 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
             serviceLabels.Push(item.Label)
 
         selectorList := inputGui.AddDropDownList(
-            "x250 yp w60 +0x210",
+            "x" . (inputWidth - rightWidth - 68) . " yp w60 +0x210",
             serviceLabels
         )
         selectorList.Choose(GetTranslationServiceIndex(CONFIG.TranslationService))
@@ -1645,10 +1657,10 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
     }
 
     submitButton := inputGui.AddButton(
-        "x" . (inputWidth - 142) . " yp w72 h26 Default",
+        "x" . (inputWidth - rightWidth) . " yp w" . submitWidth . " h26 Default",
         submitLabel
     )
-    cancelButton := inputGui.AddButton("x+8 yp w52 h26", selectorType = "voice" ? "关闭" : "取消")
+    cancelButton := inputGui.AddButton("x+8 yp w" . cancelWidth . " h26", selectorType = "voice" ? "关闭" : "取消")
 
     ActiveInputDialog := {
         Gui: inputGui,
@@ -1659,7 +1671,16 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
         SpeedTooltip: speedTooltip,
         SubmitButton: submitButton,
         CancelButton: cancelButton,
+        IconButtons: Map(),
         State: state
+    }
+
+    if useIcons
+    {
+        InitializeIconButton(inputGui, ActiveInputDialog.IconButtons, pinButton, 0xE718)
+        InitializeIconButton(inputGui, ActiveInputDialog.IconButtons, cancelButton, 0xE711)
+        if selectorType = "voice"
+            InitializeIconButton(inputGui, ActiveInputDialog.IconButtons, submitButton, 0xE995)
     }
 
     pinButton.OnEvent(
@@ -1739,6 +1760,178 @@ CreateControlTooltip(guiObject, control, text)
         return 0
     }
     return {Hwnd: tooltipHwnd, TextBuffer: textBuffer}
+}
+
+
+HasInputIconFont(fontName := "Segoe MDL2 Assets")
+{
+    dc := DllCall("user32\GetDC", "Ptr", 0, "Ptr")
+    font := CreateInputIconFont(96, fontName)
+    if !dc || !font
+    {
+        if font
+            DllCall("gdi32\DeleteObject", "Ptr", font)
+        if dc
+            DllCall("user32\ReleaseDC", "Ptr", 0, "Ptr", dc)
+        return false
+    }
+    previousFont := DllCall("gdi32\SelectObject", "Ptr", dc, "Ptr", font, "Ptr")
+    try
+    {
+        face := Buffer(128, 0)
+        DllCall("gdi32\GetTextFaceW", "Ptr", dc, "Int", 64, "Ptr", face.Ptr)
+        if StrGet(face, "UTF-16") != fontName
+            return false
+        glyphs := Chr(0xE718) . Chr(0xE77A) . Chr(0xE768) . Chr(0xE769) . Chr(0xE71A) . Chr(0xE711)
+            . Chr(0xE8C8) . Chr(0xE73E) . Chr(0xE995)
+        indices := Buffer(StrLen(glyphs) * 2, 0)
+        if DllCall("gdi32\GetGlyphIndicesW", "Ptr", dc, "Str", glyphs,
+            "Int", StrLen(glyphs), "Ptr", indices.Ptr, "UInt", 1, "UInt") = 0xFFFFFFFF
+            return false
+        Loop StrLen(glyphs)
+            if NumGet(indices, (A_Index - 1) * 2, "UShort") = 0xFFFF
+                return false
+        return true
+    }
+    finally
+    {
+        DllCall("gdi32\SelectObject", "Ptr", dc, "Ptr", previousFont)
+        DllCall("gdi32\DeleteObject", "Ptr", font)
+        DllCall("user32\ReleaseDC", "Ptr", 0, "Ptr", dc)
+    }
+}
+
+
+CreateInputIconFont(dpi, fontName := "Segoe MDL2 Assets")
+{
+    return DllCall("gdi32\CreateFontW", "Int", -Round(14 * dpi / 96),
+        "Int", 0, "Int", 0, "Int", 0, "Int", 400, "UInt", 0, "UInt", 0,
+        "UInt", 0, "UInt", 1, "UInt", 0, "UInt", 0, "UInt", 5, "UInt", 0,
+        "Str", fontName, "Ptr")
+}
+
+
+InitializeIconButton(guiObject, buttons, control, glyph)
+{
+    buttons[control.Hwnd] := {
+        Gui: guiObject, Control: control, Glyph: glyph, Hovered: false, Selected: false,
+        Tooltip: CreateControlTooltip(guiObject, control, control.Text)
+    }
+    ; Owner drawing preserves the native caption as the accessible name.
+    DllCall(A_PtrSize = 8 ? "user32\SetWindowLongPtrW" : "user32\SetWindowLongW",
+        "Ptr", control.Hwnd, "Int", -16, "Ptr", (ControlGetStyle(control) & ~0xF) | 0xB, "Ptr")
+    OnMessage(0x0200, HandleIconButtonHover)
+    OnMessage(0x02A3, HandleIconButtonHover)
+}
+
+
+GetIconButton(hwnd)
+{
+    global ActiveInputDialog, ResultIconButtons
+    if IsObject(ActiveInputDialog) && ActiveInputDialog.IconButtons.Has(hwnd)
+        return ActiveInputDialog.IconButtons[hwnd]
+    return ResultIconButtons.Has(hwnd) ? ResultIconButtons[hwnd] : 0
+}
+
+
+UpdateIconButton(control, glyph, selected := false)
+{
+    if !IsObject(control) || !control.HasProp("Hwnd")
+        return
+    button := GetIconButton(control.Hwnd)
+    if !IsObject(button)
+        return
+    button.Glyph := glyph
+    button.Selected := selected
+    controlTooltip := button.Tooltip
+    if IsObject(controlTooltip)
+    {
+        controlTooltip.TextBuffer := Buffer(StrPut(control.Text, "UTF-16") * 2)
+        StrPut(control.Text, controlTooltip.TextBuffer, "UTF-16")
+        toolInfo := Buffer(A_PtrSize = 8 ? 72 : 48, 0)
+        NumPut("UInt", toolInfo.Size, "UInt", 0x11, toolInfo)
+        NumPut("Ptr", button.Gui.Hwnd, "UPtr", control.Hwnd, toolInfo, 8)
+        NumPut("Ptr", controlTooltip.TextBuffer.Ptr, toolInfo, 8 + (3 * A_PtrSize) + 16)
+        DllCall("SendMessageW", "Ptr", controlTooltip.Hwnd, "UInt", 0x0439,
+            "Ptr", 0, "Ptr", toolInfo.Ptr)
+    }
+    DllCall("user32\InvalidateRect", "Ptr", control.Hwnd, "Ptr", 0, "Int", true)
+}
+
+
+HandleIconButtonHover(wParam, lParam, message, hwnd)
+{
+    button := GetIconButton(hwnd)
+    if !IsObject(button)
+        return
+    hovered := message = 0x0200
+    if button.Hovered = hovered
+        return
+    button.Hovered := hovered
+    if hovered
+    {
+        tracking := Buffer(A_PtrSize = 8 ? 24 : 16, 0)
+        NumPut("UInt", tracking.Size, "UInt", 2, "Ptr", hwnd, tracking)
+        DllCall("user32\TrackMouseEvent", "Ptr", tracking.Ptr)
+    }
+    DllCall("user32\InvalidateRect", "Ptr", hwnd, "Ptr", 0, "Int", true)
+}
+
+
+DrawIconButton(lParam)
+{
+    hwndOffset := A_PtrSize = 8 ? 24 : 20
+    controlHwnd := NumGet(lParam, hwndOffset, "Ptr")
+    button := GetIconButton(controlHwnd)
+    if !IsObject(button)
+        return
+    dc := NumGet(lParam, hwndOffset + A_PtrSize, "Ptr")
+    itemState := NumGet(lParam, 16, "UInt")
+    rect := Buffer(16, 0)
+    DllCall("RtlMoveMemory", "Ptr", rect.Ptr, "Ptr", lParam + hwndOffset + 2 * A_PtrSize, "UPtr", 16)
+    palette := GetAppearancePalette()
+    pinned := button.Selected
+    disabled := itemState & 0x4
+    theme := DllCall("uxtheme\OpenThemeData", "Ptr", controlHwnd, "Str", "Button", "Ptr")
+    savedDc := DllCall("gdi32\SaveDC", "Ptr", dc, "Int")
+    font := 0
+    try
+    {
+        state := disabled ? 4 : (itemState & 1 ? 3 : (button.Hovered ? 2 : (itemState & 0x20 ? 5 : 1)))
+        drawn := theme && DllCall("uxtheme\DrawThemeBackground", "Ptr", theme,
+            "Ptr", dc, "Int", 1, "Int", state, "Ptr", rect.Ptr, "Ptr", 0, "Int") = 0
+        if !drawn || pinned
+        {
+            brush := DllCall("gdi32\CreateSolidBrush", "UInt",
+                RgbToColorRef(pinned ? palette.SelectionBackground : palette.FieldBackground), "Ptr")
+            DllCall("user32\FillRect", "Ptr", dc, "Ptr", rect.Ptr, "Ptr", brush)
+            DllCall("gdi32\DeleteObject", "Ptr", brush)
+        }
+        dpi := 96
+        try dpi := DllCall("user32\GetDpiForWindow", "Ptr", controlHwnd, "UInt")
+        font := CreateInputIconFont(dpi)
+        DllCall("gdi32\SelectObject", "Ptr", dc, "Ptr", font)
+        DllCall("gdi32\SetBkMode", "Ptr", dc, "Int", 1)
+        DllCall("gdi32\SetTextColor", "Ptr", dc, "UInt",
+            RgbToColorRef(disabled ? palette.MutedText : palette.Text))
+        DllCall("user32\DrawTextW", "Ptr", dc, "Str", Chr(button.Glyph),
+            "Int", -1, "Ptr", rect.Ptr, "UInt", 0x825, "Int")
+        if itemState & 0x10 && !(itemState & 0x200)
+        {
+            inset := Max(2, Round(3 * dpi / 96))
+            DllCall("user32\InflateRect", "Ptr", rect.Ptr, "Int", -inset, "Int", -inset)
+            DllCall("user32\DrawFocusRect", "Ptr", dc, "Ptr", rect.Ptr)
+        }
+    }
+    finally
+    {
+        DllCall("gdi32\RestoreDC", "Ptr", dc, "Int", savedDc)
+        if font
+            DllCall("gdi32\DeleteObject", "Ptr", font)
+        if theme
+            DllCall("uxtheme\CloseThemeData", "Ptr", theme)
+    }
+    return true
 }
 
 
@@ -1879,6 +2072,7 @@ ToggleInputPinned(state, inputGui, pinButton, *)
     state.Pinned := !state.Pinned
     WinSetAlwaysOnTop(state.Pinned, "ahk_id " . inputGui.Hwnd)
     pinButton.Text := state.Pinned ? "取消钉住" : "钉住"
+    UpdateIconButton(pinButton, state.Pinned ? 0xE77A : 0xE718, state.Pinned)
 }
 
 
@@ -2113,20 +2307,23 @@ ResizeInputWindow(
 
     inputEdit.Move(10, 10, Max(200, width - 20), Max(100, height - 56))
     pinButton.Move(10, height - 36)
+    submitButton.GetPos(, , &submitWidth)
+    cancelButton.GetPos(, , &cancelWidth)
+    submitX := width - 18 - submitWidth - cancelWidth
 
     if IsObject(selectorList)
     {
         selectorList.GetPos(, , &selectorWidth)
-        selectorRight := width - (IsObject(speedButton) ? 214 : 150)
+        selectorRight := submitX - (IsObject(speedButton) ? 72 : 8)
         selectorList.Move(selectorRight - selectorWidth)
         CenterControlVertically(pinButton, selectorList)
     }
 
     if IsObject(speedButton)
-        speedButton.Move(width - 206, height - 36)
+        speedButton.Move(submitX - 64, height - 36)
 
-    submitButton.Move(width - 142, height - 36)
-    cancelButton.Move(width - 62, height - 36)
+    submitButton.Move(submitX, height - 36)
+    cancelButton.Move(width - 10 - cancelWidth, height - 36)
     RedrawGuiWindow(guiObject)
 }
 
@@ -2206,6 +2403,8 @@ DrawDropDownItem(wParam, lParam, message, hwnd)
     static WM_GETFONT := 0x0031
     static DT_VCENTER_SINGLELINE_END_ELLIPSIS_NOPREFIX := 0x8824
 
+    if NumGet(lParam, 0, "UInt") = 4
+        return DrawIconButton(lParam)
     if NumGet(lParam, 0, "UInt") != ODT_COMBOBOX
         return
 
@@ -3125,6 +3324,7 @@ CreateResultWindow()
 {
     global ResultGui, ResultEdit, ResultPinButton, ResultSpeakButton
     global ResultPauseButton, ResultCopyButton, ResultCloseButton
+    global ResultIconButtons, ResultPinned
 
     palette := GetAppearancePalette()
     ResultGui := Gui(
@@ -3140,11 +3340,27 @@ CreateResultWindow()
         "xm ym w380 h144 +Multi +WantReturn Background"
             . palette.FieldBackground . " c" . palette.Text
     )
-    ResultPinButton := ResultGui.AddButton("xm y+10 w72 h26", "钉住")
-    ResultPauseButton := ResultGui.AddButton("x114 yp w64 h26", "暂停")
-    ResultSpeakButton := ResultGui.AddButton("x186 yp w64 h26", "朗读")
-    ResultCopyButton := ResultGui.AddButton("x+8 yp w72 h26 Default", "复制结果")
-    ResultCloseButton := ResultGui.AddButton("x+8 yp w52 h26", "关闭")
+    useIcons := HasInputIconFont()
+    ResultIconButtons := Map()
+    ResultPinButton := ResultGui.AddButton("xm y+10 w" . (useIcons ? 28 : 72) . " h26", "钉住")
+    ResultPauseButton := ResultGui.AddButton("x" . (useIcons ? 262 : 114) . " yp w" . (useIcons ? 28 : 64) . " h26", "暂停")
+    ResultSpeakButton := ResultGui.AddButton("x+8 yp w" . (useIcons ? 28 : 64) . " h26", "朗读")
+    ResultCopyButton := ResultGui.AddButton("x+8 yp w" . (useIcons ? 28 : 72) . " h26 Default", "复制结果")
+    ResultCloseButton := ResultGui.AddButton("x+8 yp w" . (useIcons ? 28 : 52) . " h26", "关闭")
+    if useIcons
+    {
+        InitializeIconButton(ResultGui, ResultIconButtons, ResultPinButton, 0xE718)
+        InitializeIconButton(ResultGui, ResultIconButtons, ResultPauseButton, 0xE769)
+        InitializeIconButton(ResultGui, ResultIconButtons, ResultSpeakButton, 0xE995)
+        InitializeIconButton(ResultGui, ResultIconButtons, ResultCopyButton, 0xE8C8)
+        InitializeIconButton(ResultGui, ResultIconButtons, ResultCloseButton, 0xE711)
+    }
+    if ResultPinned
+    {
+        WinSetAlwaysOnTop(true, "ahk_id " . ResultGui.Hwnd)
+        ResultPinButton.Text := "取消钉住"
+        UpdateIconButton(ResultPinButton, 0xE77A, true)
+    }
 
     ResultPinButton.OnEvent("Click", ToggleResultPinned)
     ResultSpeakButton.OnEvent("Click", SpeakCurrentTranslation)
@@ -3186,6 +3402,7 @@ CopyCurrentTranslation(*)
     {
         A_Clipboard := ResultEdit.Value
         ResultCopyButton.Text := "已复制"
+        UpdateIconButton(ResultCopyButton, 0xE73E)
         SetTimer(RestoreCopyButtonFeedback, -900)
         RedrawGuiWindow(ResultGui)
     }
@@ -3200,6 +3417,7 @@ RestoreCopyButtonFeedback()
         return
 
     ResultCopyButton.Text := "复制结果"
+    UpdateIconButton(ResultCopyButton, 0xE8C8)
 
     if IsObject(ResultGui)
         RedrawGuiWindow(ResultGui)
@@ -3216,6 +3434,7 @@ ToggleResultPinned(*)
     ResultPinned := !ResultPinned
     WinSetAlwaysOnTop(ResultPinned, "ahk_id " . ResultGui.Hwnd)
     ResultPinButton.Text := ResultPinned ? "取消钉住" : "钉住"
+    UpdateIconButton(ResultPinButton, ResultPinned ? 0xE77A : 0xE718, ResultPinned)
 }
 
 
@@ -4563,10 +4782,14 @@ ResizeResultWindow(
 
     resultEdit.Move(10, 10, Max(120, width - 20), Max(72, height - 56))
     pinButton.Move(10, height - 36)
-    pauseButton.Move(width - 286, height - 36)
-    speakButton.Move(width - 214, height - 36)
-    copyButton.Move(width - 142, height - 36)
-    closeButton.Move(width - 62, height - 36)
+    nextX := width - 10
+    for control in [closeButton, copyButton, speakButton, pauseButton]
+    {
+        control.GetPos(, , &controlWidth)
+        nextX -= controlWidth
+        control.Move(nextX, height - 36)
+        nextX -= 8
+    }
     RedrawGuiWindow(guiObject)
 }
 
