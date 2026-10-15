@@ -98,6 +98,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\run-speech-tests.ps1
 
 输入窗口中按 `Enter` 提交，按 `Shift + Enter` 插入换行。翻译结果窗口支持朗读、复制、置顶和拖动。
 
+在托盘“设置 → 快捷键”中，点击翻译或朗读的快捷键后直接按下新的组合键，支持 Ctrl、Alt、Shift、Win 及功能键。录入时按 `Esc` 取消、按 `Backspace` 或 `Delete` 清除。保存后立即生效，并同步托盘菜单与提示；“恢复默认”需保存后生效，取消或关闭窗口会保留原设置。翻译与朗读不能设为同一快捷键。
+
 朗读输入窗口使用单个音色下拉框列出所有音色，打开时自动定位到上次使用的音色。
 
 输入窗口的钉住、朗读控制和关闭按钮使用 Windows 系统图标，悬停可查看操作名称；翻译按钮保留文字。图钉选中时高亮，朗读控制随播放状态切换图标。系统缺少所需图标字体时，自动恢复为文字按钮。
@@ -120,7 +122,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\run-speech-tests.ps1
 - 翻译服务
 - 朗读音色（直接列出所有音色）
 - 朗读速度
-- 设置：主题、窗口半透明、翻译结果显示在鼠标旁、开机自启、以管理员身份启动（MSIX 版本不提供）
+- 设置：主题、窗口半透明、翻译结果显示在鼠标旁、快捷键、开机自启、以管理员身份启动（MSIX 版本不提供）
 - 打开数据目录
 - 在线服务与隐私
 - 关于译读
@@ -161,7 +163,7 @@ OnlineServicesConsent=0
 | `PrivacyChoiceMade` | 是否已完成首次在线服务选择，`1` 表示已选择 |
 | `OnlineServicesConsent` | 是否允许向所选第三方发送待翻译或朗读文本，`1` 为允许 |
 
-快捷键使用 AutoHotkey 语法，例如 `^` 表示 `Ctrl`、`+` 表示 `Shift`、`!` 表示 `Alt`、`#` 表示 `Win`。
+也可手动修改快捷键，配置值使用 AutoHotkey 语法，例如 `^` 表示 `Ctrl`、`+` 表示 `Shift`、`!` 表示 `Alt`、`#` 表示 `Win`。可视化窗口会保留未修改的手动配置。
 
 ## 网络与隐私
 

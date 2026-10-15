@@ -1,6 +1,7 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Off
 #Include speech\EdgeSpeechToken.ahk
+#Include settings\Hotkeys.ahk
 ;@Ahk2Exe-SetName 译读
 ;@Ahk2Exe-SetCompanyName zero-ljz（空心）
 ;@Ahk2Exe-SetDescription 译读
@@ -93,6 +94,7 @@ global SpeechVoiceTrayMenu := 0
 global SpeechSpeedTrayMenu := 0
 global ColorThemeTrayMenu := 0
 global SettingsTrayMenu := 0
+global HotkeySettingsDialog := 0
 global SpeechAudioPath := ""
 global SpeechErrorPath := ""
 global SpeechDonePath := ""
@@ -568,6 +570,7 @@ SetupTrayMenu()
     SettingsTrayMenu.Add("翻译结果显示在鼠标旁", ToggleResultAtMouse)
     if ShowResultAtMouse
         SettingsTrayMenu.Check("翻译结果显示在鼠标旁")
+    SettingsTrayMenu.Add("快捷键", ShowHotkeySettings)
     SettingsTrayMenu.Add()
     SettingsTrayMenu.Add("开机自启", ToggleAutostart)
 
@@ -4627,6 +4630,10 @@ ApplyWindowTransparency(guiObject)
 ApplyAppearanceToOpenWindows()
 {
     global ResultGui, AboutGui, PrivacyGui, ActiveInputDialog
+    global HotkeySettingsDialog
+
+    if IsObject(HotkeySettingsDialog)
+        ApplyAppearanceToExistingWindow(HotkeySettingsDialog.Gui)
 
     if IsObject(ResultGui)
         ApplyAppearanceToExistingWindow(ResultGui)

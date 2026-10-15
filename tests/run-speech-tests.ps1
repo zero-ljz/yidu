@@ -65,6 +65,7 @@ try {
     $testPath = Join-Path $testDirectory 'speech-tests.ahk'
     [IO.File]::WriteAllText($testPath, "#Requires AutoHotkey v2.0`n#Warn All, StdOut`n" +
         '#Include ' + (Join-Path $PSScriptRoot '..\speech\EdgeSpeechToken.ahk') + "`n" +
+        '#Include ' + (Join-Path $PSScriptRoot '..\settings\Hotkeys.ahk') + "`n" +
         $settings + $menuGlobals + $globals + $tests + $speech + $worker + $tray +
         $configFunctions + $voiceFunctions + $format + $autostartAction + $adminAction +
         $resultPositionAction + $startup + $inputFunctions +

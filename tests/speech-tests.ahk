@@ -40,6 +40,8 @@ global TestTranslationTransport := 0
 global ResultGui := 0
 global TestInputError := ""
 global TestTooltipHwnd := 0
+global TestTranslateHotkeyCount := 0
+global TestSpeakHotkeyCount := 0
 
 DetectHiddenWindows(true)
 OnMessage(0x002B, DrawDropDownItem)
@@ -52,6 +54,8 @@ try
     FileAppend("PASS: tray menus, saved settings and quiet startup`n", "*")
     TestTrayOrganization()
     FileAppend("PASS: menu organization, nested settings callbacks and packaged menu`n", "*")
+    TestHotkeySettings()
+    FileAppend("PASS: hotkey recording, live rebinding, swaps, persistence, cancellation and rollback`n", "*")
     TestInputWindows()
     FileAppend("PASS: flat voice selector, saved selection and input layout`n", "*")
     TestInputDrafts()
@@ -205,9 +209,10 @@ AssertTrayOrganization()
         && DllCall("GetSubMenu", "Ptr", SettingsTrayMenu.Handle, "Int", 0, "Ptr") = ColorThemeTrayMenu.Handle, "Theme directly under settings")
     Assert(MenuItemPosition(SettingsTrayMenu, "窗口半透明") = 1, "Transparency directly under settings")
     Assert(MenuItemPosition(SettingsTrayMenu, "翻译结果显示在鼠标旁") = 2, "Translation result position belongs to settings")
+    Assert(MenuItemPosition(SettingsTrayMenu, "快捷键") = 3, "Hotkey settings are accessible")
     Assert(MenuItemPosition(SettingsTrayMenu, "结果显示在鼠标旁") = -1, "Old result position label removed")
-    Assert(MenuItemPosition(SettingsTrayMenu, "开机自启") = 4, "Autostart belongs to settings")
-    Assert(MenuItemPosition(SettingsTrayMenu, "以管理员身份启动") = (IS_PACKAGED ? -1 : 5), "Administrator option only in unpackaged menu")
+    Assert(MenuItemPosition(SettingsTrayMenu, "开机自启") = 5, "Autostart belongs to settings")
+    Assert(MenuItemPosition(SettingsTrayMenu, "以管理员身份启动") = (IS_PACKAGED ? -1 : 6), "Administrator option only in unpackaged menu")
     for index, label in ["打开数据目录", "在线服务与隐私", "关于译读"]
     {
         Assert(MenuItemPosition(A_TrayMenu, label) = index + 9, "Former help item at root: " . label)
@@ -293,6 +298,157 @@ TestTrayOrganization()
         IS_PACKAGED := false
         SetupTrayMenu()
     }
+}
+
+TestHotkeySettings()
+{
+    global CONFIG, CONFIG_PATH, HotkeySettingsDialog, SettingsTrayMenu
+    global TestTranslateHotkeyCount, TestSpeakHotkeyCount
+
+    oldTranslation := CONFIG.Hotkey
+    oldSpeech := CONFIG.SpeakHotkey
+    configBefore := FileRead(CONFIG_PATH)
+    CONFIG.Hotkey := "^!F7"
+    CONFIG.SpeakHotkey := "^!F8"
+    WriteHotkeyConfig(CONFIG.Hotkey, CONFIG.SpeakHotkey)
+    SetupTrayMenu()
+    SetConfiguredHotkeysEnabled(true)
+    try
+    {
+        IniWrite("preserved", CONFIG_PATH, "Other", "Example")
+        DispatchSettingsCommand(SettingsTrayMenu, "快捷键")
+        dialog := HotkeySettingsDialog
+        Assert(IsObject(dialog), "Settings menu opens hotkey dialog")
+        ShowHotkeySettings()
+        Assert(HotkeySettingsDialog = dialog, "Repeated open reuses hotkey dialog")
+        Assert(dialog.TranslationButton.Text = FormatHotkey(CONFIG.Hotkey)
+            && dialog.SpeechButton.Text = FormatHotkey(CONFIG.SpeakHotkey), "Current bindings displayed")
+
+        StartHotkeyRecording(dialog, "Translation")
+        SendRecordedHotkey("^!k")
+        Assert(dialog.Recording = "" && CanonicalHotkey(dialog.TranslationHotkey) = CanonicalHotkey("^!k"), "InputHook captures full Ctrl Alt chord")
+        StartHotkeyRecording(dialog, "Speech")
+        SendRecordedHotkey("#!{F9}")
+        Assert(dialog.Recording = "" && CanonicalHotkey(dialog.SpeechHotkey) = CanonicalHotkey("#!F9"), "InputHook captures Win chord")
+        StartHotkeyRecording(dialog, "Translation")
+        SendRecordedHotkey("{Escape}")
+        Assert(dialog.Recording = "" && HotkeySettingsDialog = dialog
+            && CanonicalHotkey(dialog.TranslationHotkey) = CanonicalHotkey("^!k"), "Escape cancels capture without closing or changing binding")
+        StartHotkeyRecording(dialog, "Speech")
+        HandleHotkeySettingsActivation(0, 0, 0x0006, dialog.Gui.Hwnd)
+        Assert(dialog.Recording = "" && !IsObject(dialog.Hook), "Deactivation releases keyboard capture")
+        Assert(TestTranslateHotkeyCount = 0 && TestSpeakHotkeyCount = 0, "Recording does not run actions")
+
+        StartHotkeyRecording(dialog, "Translation")
+        SendRecordedHotkey("{Backspace}")
+        Assert(dialog.TranslationHotkey = "" && !SaveHotkeySettings(dialog), "Empty binding rejected")
+        dialog.TranslationHotkey := "^!F9"
+        dialog.SpeechHotkey := "!^f9"
+        Assert(!SaveHotkeySettings(dialog) && InStr(dialog.ErrorText.Text, "相同"), "Modifier order and case do not bypass duplicate validation")
+        dialog.SpeechHotkey := "ordinary-key-does-not-exist"
+        Assert(!SaveHotkeySettings(dialog), "Invalid key rejected")
+        dialog.SpeechHotkey := "a"
+        Assert(!SaveHotkeySettings(dialog), "Plain typing key rejected")
+        Assert(CONFIG.Hotkey = "^!F7" && CONFIG.SpeakHotkey = "^!F8"
+            && IniRead(CONFIG_PATH, "Settings", "Hotkey") = "^!F7", "Validation failures preserve runtime and disk settings")
+
+        dialog.SpeechHotkey := "^!F10"
+        Assert(SaveHotkeySettings(dialog) && !IsObject(HotkeySettingsDialog), "Save applies and closes window")
+        Assert(CONFIG.Hotkey = "^!F9" && CONFIG.SpeakHotkey = "^!F10", "Saved shortcuts immediately active")
+        Assert(IniRead(CONFIG_PATH, "Settings", "SpeakHotkey") = "^!F10"
+            && IniRead(CONFIG_PATH, "Other", "Example") = "preserved", "Both shortcuts persisted without losing other settings")
+        Assert(MenuItemPosition(A_TrayMenu, "翻译`t" . FormatHotkey(CONFIG.Hotkey)) = 0
+            && InStr(A_IconTip, FormatHotkey(CONFIG.SpeakHotkey)), "Tray labels and tooltip updated")
+        TriggerTestHotkeys("^!{F9}^!{F10}")
+        Assert(TestTranslateHotkeyCount = 1 && TestSpeakHotkeyCount = 1, "New shortcuts dispatch correct live actions")
+
+        ApplyHotkeySettings("^!F11", "^!F12")
+        TriggerTestHotkeys("^!{F9}^!{F10}")
+        Assert(TestTranslateHotkeyCount = 1 && TestSpeakHotkeyCount = 1, "Old bindings are disabled")
+        ApplyHotkeySettings("^!F12", "^!F11")
+        TriggerTestHotkeys("^!{F12}")
+        Assert(TestTranslateHotkeyCount = 2 && TestSpeakHotkeyCount = 1, "Swapping bindings preserves translation action")
+        TriggerTestHotkeys("^!{F11}")
+        Assert(TestSpeakHotkeyCount = 2, "Swapping bindings preserves speech action")
+
+        ShowHotkeySettings()
+        dialog := HotkeySettingsDialog
+        RestoreHotkeyDefaults(dialog)
+        Assert(dialog.TranslationHotkey = "^F1" && dialog.SpeechHotkey = "^F2"
+            && CONFIG.Hotkey = "^!F12", "Restore defaults stays pending until save")
+        CloseHotkeySettings(dialog)
+        Assert(CONFIG.Hotkey = "^!F12" && IniRead(CONFIG_PATH, "Settings", "Hotkey") = "^!F12", "Cancel discards pending defaults")
+
+        ShowHotkeySettings()
+        dialog := HotkeySettingsDialog
+        dialog.TranslationHotkey := "^!F13"
+        dialog.SpeechHotkey := "^!F14"
+        beforeFailure := FileRead(CONFIG_PATH)
+        FileSetAttrib("+R", CONFIG_PATH)
+        try
+        {
+            Assert(!SaveHotkeySettings(dialog) && HotkeySettingsDialog = dialog, "Write failure keeps settings window open")
+            Assert(CONFIG.Hotkey = "^!F12" && CONFIG.SpeakHotkey = "^!F11"
+                && FileRead(CONFIG_PATH) == beforeFailure, "Write failure rolls back runtime and file")
+            temporaryPath := CONFIG_PATH . ".hotkeys." . DllCall("GetCurrentProcessId", "UInt") . ".tmp"
+            Assert(!FileExist(temporaryPath), "Failed save cleans temporary file")
+        }
+        finally FileSetAttrib("-R", CONFIG_PATH)
+        CloseHotkeySettings(dialog)
+        TriggerTestHotkeys("^!{F13}^!{F14}")
+        Assert(TestTranslateHotkeyCount = 2 && TestSpeakHotkeyCount = 2, "Failed save leaves no new active bindings")
+        TriggerTestHotkeys("^!{F12}^!{F11}")
+        Assert(TestTranslateHotkeyCount = 3 && TestSpeakHotkeyCount = 3, "Rollback restores original callbacks after swap")
+        LoadConfig()
+        Assert(CONFIG.Hotkey = "^!F12" && CONFIG.SpeakHotkey = "^!F11", "Reload retains saved shortcuts")
+    }
+    finally
+    {
+        if IsObject(HotkeySettingsDialog)
+            CloseHotkeySettings(HotkeySettingsDialog)
+        SetConfiguredHotkeysEnabled(false)
+        CONFIG.Hotkey := oldTranslation
+        CONFIG.SpeakHotkey := oldSpeech
+        FileSetAttrib("-R", CONFIG_PATH)
+        FileDelete(CONFIG_PATH)
+        FileAppend(configBefore, CONFIG_PATH, "UTF-8")
+        SetupTrayMenu()
+    }
+}
+
+SendRecordedHotkey(keys)
+{
+    SendLevel(1)
+    Critical "Off"
+    try
+    {
+        SendEvent(keys)
+        ; InputHook suppresses modifier downs, so explicitly emit their matching ups.
+        SendEvent("{LCtrl up}{RCtrl up}{LAlt up}{RAlt up}{LShift up}{RShift up}{LWin up}{RWin up}")
+        Sleep(80)
+    }
+    finally
+    {
+        SendLevel(0)
+        Critical
+    }
+}
+
+TriggerTestHotkeys(keys)
+{
+    SendRecordedHotkey(keys)
+}
+
+TranslateFromHotkey(*)
+{
+    global TestTranslateHotkeyCount
+    TestTranslateHotkeyCount += 1
+}
+
+SpeakFromHotkey(*)
+{
+    global TestSpeakHotkeyCount
+    TestSpeakHotkeyCount += 1
 }
 
 TestInputWindows()

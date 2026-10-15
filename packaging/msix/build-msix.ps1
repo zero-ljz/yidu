@@ -141,7 +141,7 @@ Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination (Join-Path $layo
 # Include the corresponding application and LGPL helper sources for modification/recompilation.
 $sourceLayout = Join-Path $layoutPath 'source'
 New-Item -ItemType Directory -Force -Path $sourceLayout | Out-Null
-foreach ($sourceFile in @('YiDu.ahk', 'YiDu.ico', 'README.md', 'LICENSE', 'speech', 'third-party')) {
+foreach ($sourceFile in @('YiDu.ahk', 'YiDu.ico', 'README.md', 'LICENSE', 'speech', 'settings', 'third-party')) {
     Copy-Item -LiteralPath (Join-Path $root $sourceFile) -Destination $sourceLayout -Recurse -Force
 }
 
