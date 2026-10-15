@@ -11,6 +11,12 @@ global CONFIG_DIRECTORY := TestDirectory
 global CONFIG_PATH := TestDirectory . "\YiDu.ini"
 global AUTOSTART_SHORTCUT := TestDirectory . "\test-autostart.lnk"
 global TestPackagedAutostart := false
+global TestRestartOffers := 0
+global TestPrivacyCancellations := 0
+global PrivacyGui := 0
+global TestDuringAutostart := 0
+global TestSaveCancelAttempts := 0
+global TestSaveCancelledBeforeCommit := false
 global TestIsAdmin := true
 global TestSettingsErrors := []
 global TestHelpCalls := []
@@ -53,7 +59,7 @@ try
     TestTraySettings()
     FileAppend("PASS: tray menus, saved settings and quiet startup`n", "*")
     TestTrayOrganization()
-    FileAppend("PASS: menu organization, nested settings callbacks and packaged menu`n", "*")
+    FileAppend("PASS: unified settings, drafts, persistence, rollback, consent and packaged window`n", "*")
     TestHotkeySettings()
     FileAppend("PASS: hotkey recording, live rebinding, swaps, persistence, cancellation and rollback`n", "*")
     TestInputWindows()
@@ -114,10 +120,10 @@ MenuItemState(menu, label)
 
 TestTraySettings()
 {
-    global CONFIG, CONFIG_PATH, SPEECH_VOICES, SpeechVoiceTrayMenu
-    global SettingsTrayMenu, ColorThemeTrayMenu, TestAppearanceUpdates
+    global CONFIG, CONFIG_PATH, SPEECH_VOICES
+    global TestAppearanceUpdates
     global TestFirstRunCount, TestNotifications
-    global SPEECH_SPEEDS, SpeechSpeedTrayMenu
+    global SPEECH_SPEEDS
     Assert(!CONFIG.WindowTransparency, "New default transparency")
     Assert(CONFIG.SpeechVoice = "zh-CN-XiaoyiNeural", "Default voice preserved")
     Assert(CONFIG.SpeechSpeed = 1, "Default speech speed")
@@ -148,80 +154,26 @@ TestTraySettings()
     Assert(MenuItemState(A_TrayMenu, "暂停朗读") & 3, "Idle pause item disabled")
     Assert(MenuItemPosition(A_TrayMenu, "语音角色") = -1, "Old voice menu removed")
     Assert(MenuItemPosition(A_TrayMenu, "窗口半透明") = -1, "Transparency belongs to settings")
-    Assert(MenuItemPosition(A_TrayMenu, "朗读音色") >= 0, "Voice root menu")
-    Assert(MenuItemPosition(A_TrayMenu, "朗读速度") >= 0, "Speed root menu")
-    for item in SPEECH_SPEEDS
-        Assert(!!(MenuItemState(SpeechSpeedTrayMenu, item.Label) & 8) = (item.Value = CONFIG.SpeechSpeed), "Speed menu selection")
-    Assert(DllCall("GetMenuItemCount", "Ptr", SpeechVoiceTrayMenu.Handle, "Int") = SPEECH_VOICES.Length, "Flat voice menu contains all voices")
-    for index, item in SPEECH_VOICES
-    {
-        Assert(MenuItemPosition(SpeechVoiceTrayMenu, item.Label) = index - 1, "Flat voice menu order")
-        Assert(!DllCall("GetSubMenu", "Ptr", SpeechVoiceTrayMenu.Handle, "Int", index - 1, "Ptr"), "Voice item has no category submenu")
-    }
-    Assert(MenuItemState(SpeechVoiceTrayMenu, "晓佳 HiuGaai · 粤语") & 8, "Saved voice checked")
     SetSpeechVoice("en-US-GuyNeural")
-    Assert(!(MenuItemState(SpeechVoiceTrayMenu, "晓佳 HiuGaai · 粤语") & 8), "Old voice unchecked")
-    Assert(MenuItemState(SpeechVoiceTrayMenu, "Guy · 英语男声") & 8, "New voice checked")
-    for index, item in SPEECH_VOICES
-    {
-        DispatchSettingsCommand(SpeechVoiceTrayMenu, item.Label)
-        Assert(CONFIG.SpeechVoice = item.Voice && (MenuItemState(SpeechVoiceTrayMenu, item.Label) & 8), "Flat voice menu callback selects voice")
-    }
-    Assert(IniRead(CONFIG_PATH, "Settings", "SpeechVoice") = "en-US-GuyNeural", "Voice choice persisted")
-    Assert(MenuItemState(ColorThemeTrayMenu, "深色") & 8, "Saved theme checked")
-    SetColorTheme("light")
-    Assert(MenuItemState(ColorThemeTrayMenu, "浅色") & 8, "Theme selection checked")
-    Assert(!(MenuItemState(ColorThemeTrayMenu, "深色") & 8), "Previous theme unchecked")
-    Assert(MenuItemState(SettingsTrayMenu, "窗口半透明") & 8, "Saved transparency checked")
-    ToggleWindowTransparency()
-    Assert(!CONFIG.WindowTransparency && !(MenuItemState(SettingsTrayMenu, "窗口半透明") & 8), "Transparency toggle")
-    Assert(IniRead(CONFIG_PATH, "Settings", "WindowTransparency") = "0", "Transparency persisted")
-    Assert(TestAppearanceUpdates = 2, "Appearance applied to open windows")
-    CONFIG.PrivacyChoiceMade := false
-    TestStartup()
-    Critical "Off"
-    Sleep(30)
-    Critical
-    Assert(TestFirstRunCount = 1, "First-run consent window retained")
-    CONFIG.PrivacyChoiceMade := true
-    TestStartup()
-    Assert(TestFirstRunCount = 1 && TestNotifications.Length = 0, "Later startup remains quiet")
+    Assert(IniRead(CONFIG_PATH, "Settings", "SpeechVoice") = "en-US-GuyNeural", "Quick voice choice persisted")
 }
+
 
 AssertTrayOrganization()
 {
-    global CONFIG, IS_PACKAGED, SettingsTrayMenu, ColorThemeTrayMenu
+    global CONFIG
     labels := ["翻译`t" . FormatHotkey(CONFIG.Hotkey), "朗读`t" . FormatHotkey(CONFIG.SpeakHotkey),
-        "暂停朗读", "停止朗读", "", "翻译服务", "朗读音色", "朗读速度", "", "设置",
-        "打开数据目录", "在线服务与隐私", "关于译读", "", "退出"]
+        "暂停朗读", "停止朗读", "", "设置", "打开数据目录", "关于译读", "", "退出"]
     Assert(DllCall("GetMenuItemCount", "Ptr", A_TrayMenu.Handle, "Int") = labels.Length, "Compact root menu")
     for index, label in labels
     {
         if label != ""
             Assert(MenuItemPosition(A_TrayMenu, label) = index - 1, "Root item order: " . label)
-        else
-            Assert(DllCall("GetMenuState", "Ptr", A_TrayMenu.Handle, "UInt", index - 1,
-                "UInt", 0x400, "UInt") & 0x800, "Root separator placement")
     }
-    Assert(DllCall("GetSubMenu", "Ptr", A_TrayMenu.Handle, "Int", 9, "Ptr") = SettingsTrayMenu.Handle, "Settings submenu attached")
-    Assert(MenuItemPosition(SettingsTrayMenu, "外观") = -1, "Appearance submenu removed")
-    Assert(MenuItemPosition(SettingsTrayMenu, "主题") = 0
-        && DllCall("GetSubMenu", "Ptr", SettingsTrayMenu.Handle, "Int", 0, "Ptr") = ColorThemeTrayMenu.Handle, "Theme directly under settings")
-    Assert(MenuItemPosition(SettingsTrayMenu, "窗口半透明") = 1, "Transparency directly under settings")
-    Assert(MenuItemPosition(SettingsTrayMenu, "翻译结果显示在鼠标旁") = 2, "Translation result position belongs to settings")
-    Assert(MenuItemPosition(SettingsTrayMenu, "快捷键") = 3, "Hotkey settings are accessible")
-    Assert(MenuItemPosition(SettingsTrayMenu, "结果显示在鼠标旁") = -1, "Old result position label removed")
-    Assert(MenuItemPosition(SettingsTrayMenu, "开机自启") = 5, "Autostart belongs to settings")
-    Assert(MenuItemPosition(SettingsTrayMenu, "以管理员身份启动") = (IS_PACKAGED ? -1 : 6), "Administrator option only in unpackaged menu")
-    for index, label in ["打开数据目录", "在线服务与隐私", "关于译读"]
-    {
-        Assert(MenuItemPosition(A_TrayMenu, label) = index + 9, "Former help item at root: " . label)
-        Assert(!DllCall("GetSubMenu", "Ptr", A_TrayMenu.Handle, "Int", index + 9, "Ptr"), "Former help item is a direct command")
-    }
-    for label in ["外观", "翻译结果显示在鼠标旁", "结果显示在鼠标旁", "在鼠标指针处显示结果", "开机自启", "以管理员身份启动", "帮助"]
-        Assert(MenuItemPosition(A_TrayMenu, label) = -1, "Low-frequency option removed from root: " . label)
+    Assert(!DllCall("GetSubMenu", "Ptr", A_TrayMenu.Handle, "Int", 5, "Ptr"), "Settings is a direct command")
     Assert(A_TrayMenu.Default = labels[1] && A_TrayMenu.ClickCount = 1, "Default tray action remains translate")
 }
+
 
 DispatchSettingsCommand(menu, label)
 {
@@ -234,75 +186,149 @@ DispatchSettingsCommand(menu, label)
 
 TestTrayOrganization()
 {
-    global CONFIG, CONFIG_PATH, IS_PACKAGED, SettingsTrayMenu, ShowResultAtMouse
-    global ColorThemeTrayMenu
-    global TestIsAdmin, TestSettingsErrors, TestHelpCalls
+    global CONFIG, CONFIG_PATH, IS_PACKAGED, SettingsDialog, ShowResultAtMouse
+    global TestRestartOffers, TestPrivacyCancellations, TestAppearanceUpdates
+    global PrivacyGui, TestDuringAutostart, TestSaveCancelAttempts, TestSaveCancelledBeforeCommit
     AssertTrayOrganization()
-    for expected in [true, false]
+    DispatchSettingsCommand(A_TrayMenu, "设置")
+    dialog := SettingsDialog
+    Assert(IsObject(dialog) && dialog.Page = 1, "Tray opens general settings")
+    for header in dialog.HeaderButtons
+        Assert((ControlGetStyle(header) & 0xF) = 0xB, "Page headers retain owner drawing after showing the window")
+    SelectSettingsPage(dialog, 2)
+    Assert(dialog.Consent.Visible && !dialog.Transparency.Visible && !dialog.TranslationButton.Visible, "Only selected page controls are visible")
+    SelectSettingsPage(dialog, 3)
+    Assert(dialog.TranslationButton.Visible && !dialog.Consent.Visible, "Keyboard page replaces service controls")
+    HandleSettingsPageKeyDown(0x25, 0, 0x0100, dialog.HeaderButtons[3].Hwnd)
+    Assert(dialog.Page = 2, "Arrow keys navigate page headers")
+    SelectSettingsPage(dialog, 1)
+    transparencyProbe := Gui()
+    transparencyProbe.Show("Hide w100 h100")
+    ApplyWindowTransparency(transparencyProbe)
+    Assert(WinGetTransparent("ahk_id " . transparencyProbe.Hwnd) = 235, "Saved transparency applied to windows")
+    dialog.Transparency.Value := false
+    dialog.ThemeList.Choose(3)
+    beforePreview := TestAppearanceUpdates
+    PreviewSettingsAppearance(dialog)
+    for header in dialog.HeaderButtons
+        Assert((ControlGetStyle(header) & 0xF) = 0xB, "Theme preview preserves flat page headers")
+    ApplyWindowTransparency(transparencyProbe)
+    Assert(WinGetTransparent("ahk_id " . transparencyProbe.Hwnd) = ""
+        && CONFIG.WindowTransparency && IniRead(CONFIG_PATH, "Settings", "WindowTransparency") = "1",
+        "Transparency preview updates windows without saving preference")
+    Assert(GetEffectiveColorTheme() = "light" && CONFIG.ColorTheme = "dark"
+        && IniRead(CONFIG_PATH, "Settings", "ColorTheme") = "dark"
+        && TestAppearanceUpdates > beforePreview, "Theme preview updates windows without changing runtime preference or disk")
+    dialog.ResultPosition.Value := false
+    dialog.Autostart.Value := true
+    dialog.Admin.Value := true
+    dialog.ServiceList.Choose(2)
+    dialog.SpeedList.Choose(GetSpeechSpeedIndex(2))
+    dialog.Consent.Value := true
+    Assert(CONFIG.ColorTheme = "dark" && !IsAutostartEnabled(), "Edits remain drafts")
+    CloseSettings(dialog)
+    Assert(CONFIG.ColorTheme = "dark" && !IsAutostartEnabled(), "Cancel discards all pages")
+    Assert(GetEffectiveColorTheme() = "dark" && TestAppearanceUpdates > beforePreview + 1, "Cancel restores original theme on open windows")
+    ApplyWindowTransparency(transparencyProbe)
+    Assert(WinGetTransparent("ahk_id " . transparencyProbe.Hwnd) = 235, "Cancel restores saved transparency")
+    ShowSettings()
+    dialog := SettingsDialog
+    dialog.ThemeList.Choose(3)
+    dialog.Transparency.Value := false
+    dialog.ResultPosition.Value := false
+    dialog.Autostart.Value := true
+    dialog.Admin.Value := true
+    dialog.ServiceList.Choose(2)
+    dialog.SpeedList.Choose(GetSpeechSpeedIndex(2))
+    dialog.Consent.Value := true
+    PrivacyGui := Gui()
+    privacyHwnd := PrivacyGui.Hwnd
+    TestDuringAutostart := TryCancelSettingsSave.Bind(dialog)
+    Critical "Off"
+    saved := SaveSettings(dialog)
+    Sleep(60)
+    Critical
+    Assert(saved, "Save all settings")
+    Assert(TestSaveCancelAttempts = 1 && !TestSaveCancelledBeforeCommit, "Window events cannot interrupt settings persistence")
+    Assert(!IsObject(PrivacyGui) && !DllCall("IsWindow", "Ptr", privacyHwnd), "Saving consent closes stale first-run disclosure")
+    Assert(CONFIG.ColorTheme = "light" && !CONFIG.WindowTransparency && !ShowResultAtMouse, "Appearance and position applied")
+    Assert(GetEffectiveColorTheme() = "light" && !IsObject(SettingsDialog), "Saved theme remains after preview closes")
+    ApplyWindowTransparency(transparencyProbe)
+    Assert(WinGetTransparent("ahk_id " . transparencyProbe.Hwnd) = ""
+        && IniRead(CONFIG_PATH, "Settings", "WindowTransparency") = "0", "Saved transparency remains after preview closes")
+    transparencyProbe.Destroy()
+    Assert(CONFIG.TranslationService = "youdao" && CONFIG.SpeechSpeed = 2 && CONFIG.OnlineServicesConsent, "Speech and service applied")
+    Assert(IsAutostartEnabled() && CONFIG.RunAsAdmin && TestRestartOffers = 1, "Autostart applied and restart offered after save")
+    LoadConfig()
+    Assert(CONFIG.TranslationService = "youdao" && CONFIG.ColorTheme = "light" && CONFIG.RunAsAdmin, "All pages persist")
+    ShowSettings(2)
+    dialog := SettingsDialog
+    RestoreSettingsDefaults(dialog)
+    Assert(!dialog.Consent.Value && CONFIG.OnlineServicesConsent, "Default consent remains draft")
+    Assert(dialog.ThemeList.Value = 3 && dialog.Admin.Value, "Restore defaults affects current page only")
+    CloseSettings(dialog)
+    ShowSettings()
+    dialog := SettingsDialog
+    dialog.Autostart.Value := false
+    dialog.ThemeList.Choose(2)
+    beforeFailure := FileRead(CONFIG_PATH)
+    FileSetAttrib("+R", CONFIG_PATH)
+    try
     {
-        DispatchSettingsCommand(SettingsTrayMenu, "窗口半透明")
-        Assert(CONFIG.WindowTransparency = expected
-            && !!(MenuItemState(SettingsTrayMenu, "窗口半透明") & 8) = expected, "Transparency callback updates settings check")
-        Assert(IniRead(CONFIG_PATH, "Settings", "WindowTransparency") + 0 = expected, "Transparency preference persisted")
-        SetupTrayMenu()
-        Assert(!!(MenuItemState(SettingsTrayMenu, "窗口半透明") & 8) = expected, "Rebuilt settings restores transparency check")
+        Assert(!SaveSettings(dialog), "Settings write failure reported")
+        Assert(IsAutostartEnabled() && CONFIG.ColorTheme = "light" && FileRead(CONFIG_PATH) == beforeFailure, "Failure rolls back OS state and preserves all preferences")
     }
-    for item in [{Label: "跟随系统", Theme: "system"}, {Label: "浅色", Theme: "light"}]
-    {
-        DispatchSettingsCommand(ColorThemeTrayMenu, item.Label)
-        Assert(CONFIG.ColorTheme = item.Theme && (MenuItemState(ColorThemeTrayMenu, item.Label) & 8), "Theme callback remains accessible")
-        Assert(IniRead(CONFIG_PATH, "Settings", "ColorTheme") = item.Theme, "Theme preference persisted")
-    }
-    Assert(MenuItemState(SettingsTrayMenu, "翻译结果显示在鼠标旁") & 8, "Saved result position checked")
-    for expected in [false, true]
-    {
-        DispatchSettingsCommand(SettingsTrayMenu, "翻译结果显示在鼠标旁")
-        Assert(ShowResultAtMouse = expected && CONFIG.ShowResultAtMouse = expected
-            && !!(MenuItemState(SettingsTrayMenu, "翻译结果显示在鼠标旁") & 8) = expected, "Result position callback updates nested check")
-        Assert(IniRead(CONFIG_PATH, "Settings", "ShowResultAtMouse") + 0 = expected, "Result position persisted")
-    }
-    for expected in [true, false]
-    {
-        DispatchSettingsCommand(SettingsTrayMenu, "开机自启")
-        Assert(IsAutostartEnabled() = expected && !!(MenuItemState(SettingsTrayMenu, "开机自启") & 8) = expected, "Unpackaged autostart callback updates nested check")
-        DispatchSettingsCommand(SettingsTrayMenu, "以管理员身份启动")
-        Assert(CONFIG.RunAsAdmin = expected && !!(MenuItemState(SettingsTrayMenu, "以管理员身份启动") & 8) = expected, "Admin callback updates nested check")
-        Assert(IniRead(CONFIG_PATH, "Settings", "RunAsAdmin") + 0 = expected, "Admin preference persisted")
-    }
-    Assert(TestSettingsErrors.Length = 0, "Nested callbacks succeed")
-    TestIsAdmin := false
-    DispatchSettingsCommand(SettingsTrayMenu, "以管理员身份启动")
-    Assert(!CONFIG.RunAsAdmin && !(MenuItemState(SettingsTrayMenu, "以管理员身份启动") & 8)
-        && TestSettingsErrors.Length = 1, "Failed admin restart resets nested check")
-    TestIsAdmin := true
-    TestSettingsErrors := []
-    for label in ["在线服务与隐私", "关于译读"]
-        DispatchSettingsCommand(A_TrayMenu, label)
-    Assert(TestHelpCalls.Length = 2 && TestHelpCalls[1] = "privacy" && TestHelpCalls[2] = "about", "Root privacy and about callbacks remain accessible")
-
+    finally FileSetAttrib("-R", CONFIG_PATH)
+    CloseSettings(dialog)
+    ShowSettings(2)
+    dialog := SettingsDialog
+    dialog.Consent.Value := false
+    Assert(SaveSettings(dialog) && !CONFIG.OnlineServicesConsent && TestPrivacyCancellations = 1, "Revocation stops online work only after save")
+    ShowSettings(2)
+    dialog := SettingsDialog
+    PrivacyGui := Gui()
+    SetOnlineServicesConsent(true, PrivacyGui)
+    Assert(CONFIG.OnlineServicesConsent && dialog.Consent.Value, "First-run choice updates an open settings draft")
+    CloseSettings(dialog)
+    PrivacyGui := Gui()
+    SetOnlineServicesConsent(false, PrivacyGui)
     IS_PACKAGED := true
     try
     {
         SetupTrayMenu()
         AssertTrayOrganization()
-        for expected in [true, false]
-        {
-            DispatchSettingsCommand(SettingsTrayMenu, "开机自启")
-            Assert(IsAutostartEnabled() = expected && !!(MenuItemState(SettingsTrayMenu, "开机自启") & 8) = expected, "Packaged autostart callback updates nested check")
-            SetupTrayMenu()
-            Assert(!!(MenuItemState(SettingsTrayMenu, "开机自启") & 8) = expected, "Rebuilt menu restores packaged autostart check")
-        }
+        ShowSettings()
+        dialog := SettingsDialog
+        Assert(!IsObject(dialog.Admin), "Packaged settings omit administrator option")
+        dialog.Autostart.Value := true
+        Assert(SaveSettings(dialog) && IsAutostartEnabled(), "Packaged autostart saves")
+        SetAutostartEnabled(false)
     }
     finally
     {
+        if IsObject(SettingsDialog)
+            CloseSettings(SettingsDialog)
         IS_PACKAGED := false
+        SetAutostartEnabled(false)
+        CONFIG.RunAsAdmin := false
+        WriteConfigSetting("RunAsAdmin", 0)
         SetupTrayMenu()
     }
 }
 
+
+TryCancelSettingsSave(dialog, *)
+{
+    global SettingsDialog, TestSaveCancelAttempts, TestSaveCancelledBeforeCommit
+    TestSaveCancelAttempts += 1
+    TestSaveCancelledBeforeCommit := IsObject(SettingsDialog)
+    CloseSettings(dialog)
+}
+
+
 TestHotkeySettings()
 {
-    global CONFIG, CONFIG_PATH, HotkeySettingsDialog, SettingsTrayMenu
+    global CONFIG, CONFIG_PATH, SettingsDialog
     global TestTranslateHotkeyCount, TestSpeakHotkeyCount
 
     oldTranslation := CONFIG.Hotkey
@@ -316,51 +342,51 @@ TestHotkeySettings()
     try
     {
         IniWrite("preserved", CONFIG_PATH, "Other", "Example")
-        DispatchSettingsCommand(SettingsTrayMenu, "快捷键")
-        dialog := HotkeySettingsDialog
+        ShowSettings(3)
+        dialog := SettingsDialog
         Assert(IsObject(dialog), "Settings menu opens hotkey dialog")
-        ShowHotkeySettings()
-        Assert(HotkeySettingsDialog = dialog, "Repeated open reuses hotkey dialog")
+        ShowSettings(3)
+        Assert(SettingsDialog = dialog, "Repeated open reuses hotkey dialog")
         Assert(dialog.TranslationButton.Text = FormatHotkey(CONFIG.Hotkey)
             && dialog.SpeechButton.Text = FormatHotkey(CONFIG.SpeakHotkey), "Current bindings displayed")
 
         StartHotkeyRecording(dialog, "Translation")
         SendRecordedHotkey("^!k")
-        Assert(dialog.Recording = "" && CanonicalHotkey(dialog.TranslationHotkey) = CanonicalHotkey("^!k"), "InputHook captures full Ctrl Alt chord")
+        Assert(dialog.Recording = "" && CanonicalHotkey(dialog.TranslationHotkey) = CanonicalHotkey("^!k"), "InputHook captures full Ctrl Alt chord (recording=" . dialog.Recording . ", key=" . dialog.TranslationHotkey . ", candidate=" . dialog.Candidate . ")")
         StartHotkeyRecording(dialog, "Speech")
         SendRecordedHotkey("#!{F9}")
         Assert(dialog.Recording = "" && CanonicalHotkey(dialog.SpeechHotkey) = CanonicalHotkey("#!F9"), "InputHook captures Win chord")
         StartHotkeyRecording(dialog, "Translation")
         SendRecordedHotkey("{Escape}")
-        Assert(dialog.Recording = "" && HotkeySettingsDialog = dialog
+        Assert(dialog.Recording = "" && SettingsDialog = dialog
             && CanonicalHotkey(dialog.TranslationHotkey) = CanonicalHotkey("^!k"), "Escape cancels capture without closing or changing binding")
         StartHotkeyRecording(dialog, "Speech")
-        HandleHotkeySettingsActivation(0, 0, 0x0006, dialog.Gui.Hwnd)
+        HandleSettingsActivation(0, 0, 0x0006, dialog.Gui.Hwnd)
         Assert(dialog.Recording = "" && !IsObject(dialog.Hook), "Deactivation releases keyboard capture")
         Assert(TestTranslateHotkeyCount = 0 && TestSpeakHotkeyCount = 0, "Recording does not run actions")
 
         StartHotkeyRecording(dialog, "Translation")
         SendRecordedHotkey("{Backspace}")
-        Assert(dialog.TranslationHotkey = "" && !SaveHotkeySettings(dialog), "Empty binding rejected")
+        Assert(dialog.TranslationHotkey = "" && !SaveSettings(dialog), "Empty binding rejected")
         dialog.TranslationHotkey := "^!F9"
         dialog.SpeechHotkey := "!^f9"
-        Assert(!SaveHotkeySettings(dialog) && InStr(dialog.ErrorText.Text, "相同"), "Modifier order and case do not bypass duplicate validation")
+        Assert(!SaveSettings(dialog) && InStr(dialog.ErrorText.Text, "相同"), "Modifier order and case do not bypass duplicate validation")
         dialog.SpeechHotkey := "ordinary-key-does-not-exist"
-        Assert(!SaveHotkeySettings(dialog), "Invalid key rejected")
+        Assert(!SaveSettings(dialog), "Invalid key rejected")
         dialog.SpeechHotkey := "a"
-        Assert(!SaveHotkeySettings(dialog), "Plain typing key rejected")
+        Assert(!SaveSettings(dialog), "Plain typing key rejected")
         Assert(CONFIG.Hotkey = "^!F7" && CONFIG.SpeakHotkey = "^!F8"
             && IniRead(CONFIG_PATH, "Settings", "Hotkey") = "^!F7", "Validation failures preserve runtime and disk settings")
 
         dialog.SpeechHotkey := "^!F10"
-        Assert(SaveHotkeySettings(dialog) && !IsObject(HotkeySettingsDialog), "Save applies and closes window")
+        Assert(SaveSettings(dialog) && !IsObject(SettingsDialog), "Save applies and closes window")
         Assert(CONFIG.Hotkey = "^!F9" && CONFIG.SpeakHotkey = "^!F10", "Saved shortcuts immediately active")
         Assert(IniRead(CONFIG_PATH, "Settings", "SpeakHotkey") = "^!F10"
             && IniRead(CONFIG_PATH, "Other", "Example") = "preserved", "Both shortcuts persisted without losing other settings")
         Assert(MenuItemPosition(A_TrayMenu, "翻译`t" . FormatHotkey(CONFIG.Hotkey)) = 0
             && InStr(A_IconTip, FormatHotkey(CONFIG.SpeakHotkey)), "Tray labels and tooltip updated")
         TriggerTestHotkeys("^!{F9}^!{F10}")
-        Assert(TestTranslateHotkeyCount = 1 && TestSpeakHotkeyCount = 1, "New shortcuts dispatch correct live actions")
+        Assert(TestTranslateHotkeyCount = 1 && TestSpeakHotkeyCount = 1, "New shortcuts dispatch correct live actions (translate=" . TestTranslateHotkeyCount . ", speech=" . TestSpeakHotkeyCount . ")")
 
         ApplyHotkeySettings("^!F11", "^!F12")
         TriggerTestHotkeys("^!{F9}^!{F10}")
@@ -371,30 +397,30 @@ TestHotkeySettings()
         TriggerTestHotkeys("^!{F11}")
         Assert(TestSpeakHotkeyCount = 2, "Swapping bindings preserves speech action")
 
-        ShowHotkeySettings()
-        dialog := HotkeySettingsDialog
+        ShowSettings(3)
+        dialog := SettingsDialog
         RestoreHotkeyDefaults(dialog)
         Assert(dialog.TranslationHotkey = "^F1" && dialog.SpeechHotkey = "^F2"
             && CONFIG.Hotkey = "^!F12", "Restore defaults stays pending until save")
-        CloseHotkeySettings(dialog)
+        CloseSettings(dialog)
         Assert(CONFIG.Hotkey = "^!F12" && IniRead(CONFIG_PATH, "Settings", "Hotkey") = "^!F12", "Cancel discards pending defaults")
 
-        ShowHotkeySettings()
-        dialog := HotkeySettingsDialog
+        ShowSettings(3)
+        dialog := SettingsDialog
         dialog.TranslationHotkey := "^!F13"
         dialog.SpeechHotkey := "^!F14"
         beforeFailure := FileRead(CONFIG_PATH)
         FileSetAttrib("+R", CONFIG_PATH)
         try
         {
-            Assert(!SaveHotkeySettings(dialog) && HotkeySettingsDialog = dialog, "Write failure keeps settings window open")
+            Assert(!SaveSettings(dialog) && SettingsDialog = dialog, "Write failure keeps settings window open")
             Assert(CONFIG.Hotkey = "^!F12" && CONFIG.SpeakHotkey = "^!F11"
                 && FileRead(CONFIG_PATH) == beforeFailure, "Write failure rolls back runtime and file")
-            temporaryPath := CONFIG_PATH . ".hotkeys." . DllCall("GetCurrentProcessId", "UInt") . ".tmp"
+            temporaryPath := CONFIG_PATH . ".settings." . DllCall("GetCurrentProcessId", "UInt") . ".tmp"
             Assert(!FileExist(temporaryPath), "Failed save cleans temporary file")
         }
         finally FileSetAttrib("-R", CONFIG_PATH)
-        CloseHotkeySettings(dialog)
+        CloseSettings(dialog)
         TriggerTestHotkeys("^!{F13}^!{F14}")
         Assert(TestTranslateHotkeyCount = 2 && TestSpeakHotkeyCount = 2, "Failed save leaves no new active bindings")
         TriggerTestHotkeys("^!{F12}^!{F11}")
@@ -404,8 +430,8 @@ TestHotkeySettings()
     }
     finally
     {
-        if IsObject(HotkeySettingsDialog)
-            CloseHotkeySettings(HotkeySettingsDialog)
+        if IsObject(SettingsDialog)
+            CloseSettings(SettingsDialog)
         SetConfiguredHotkeysEnabled(false)
         CONFIG.Hotkey := oldTranslation
         CONFIG.SpeakHotkey := oldSpeech
@@ -469,8 +495,8 @@ TestInputWindows()
 
 InspectTestInput(mode)
 {
-    global ActiveInputDialog, CONFIG, CONFIG_PATH, SPEECH_VOICES
-    global TestInputError, TestTooltipHwnd, SPEECH_SPEEDS, SpeechSpeedTrayMenu
+    global ActiveInputDialog, CONFIG, CONFIG_PATH, SPEECH_VOICES, SettingsDialog
+    global TestInputError, TestTooltipHwnd, SPEECH_SPEEDS
     global TestDraftScenario, TestVoiceScenario
     Critical
     if !IsObject(ActiveInputDialog)
@@ -525,18 +551,18 @@ InspectTestInput(mode)
                 Critical
                 Assert(CONFIG.SpeechSpeed = speed, "Speed button cycles and wraps")
                 Assert(dialog.SpeedButton.Text = GetSpeechSpeedLabel(), "Speed button label updated")
-                Assert(MenuItemState(SpeechSpeedTrayMenu, GetSpeechSpeedLabel()) & 8, "Speed button syncs tray")
                 Assert(IniRead(CONFIG_PATH, "Settings", "SpeechSpeed") + 0 = speed, "Speed choice persisted")
                 dialog.SpeedButton.GetPos(, , &buttonWidth)
                 Assert(buttonWidth = 56, "Speed button width stays fixed")
             }
-            speedCommand := DllCall("GetMenuItemID", "Ptr", SpeechSpeedTrayMenu.Handle,
-                "Int", MenuItemPosition(SpeechSpeedTrayMenu, "2×"), "UInt")
-            DllCall("PostMessageW", "Ptr", A_ScriptHwnd, "UInt", 0x111, "UPtr", speedCommand, "Ptr", 0)
-            Critical "Off"
-            Sleep(30)
-            Critical
-            Assert(CONFIG.SpeechSpeed = 2 && dialog.SpeedButton.Text = "2×", "Tray speed syncs input button")
+            SetSpeechSpeed(2)
+            Assert(CONFIG.SpeechSpeed = 2 && dialog.SpeedButton.Text = "2×", "Saved speed syncs input button")
+            ShowSettings(2)
+            pending := SettingsDialog
+            pending.SpeedList.Choose(GetSpeechSpeedIndex(1.25))
+            pending.VoiceList.Choose(1)
+            Assert(SaveSettings(pending), "Unified settings save with active voice input")
+            Assert(dialog.SpeedButton.Text = "1.25×" && dialog.SelectorList.Value = 1, "Settings update active voice and speed controls")
             savedIndex := GetSpeechVoiceIndex(CONFIG.SpeechVoice)
             Assert(dialog.SelectorList.Value = savedIndex, "Saved voice restored")
             count := SendMessage(0x0146, , , , "ahk_id " . dialog.SelectorList.Hwnd)
@@ -1519,6 +1545,14 @@ SpeakFromTray(*)
 IsAutostartEnabled()
 {
     global AUTOSTART_SHORTCUT, IS_PACKAGED, TestPackagedAutostart
+    global TestDuringAutostart
+    if IsObject(TestDuringAutostart)
+    {
+        callback := TestDuringAutostart
+        TestDuringAutostart := 0
+        SetTimer(callback, -1)
+        Sleep(50)
+    }
     return IS_PACKAGED ? TestPackagedAutostart : FileExist(AUTOSTART_SHORTCUT) != ""
 }
 
@@ -1540,15 +1574,18 @@ TestSettingsMessage(message, *)
     TestSettingsErrors.Push(message)
 }
 
-TestAdminRestart()
+OfferSettingsRestart(runAsAdmin)
 {
-    throw Error("Synthetic admin restart failure")
+    global TestRestartOffers
+    TestRestartOffers += 1
 }
 
-TestRestartExit()
+CancelActiveOnlineOperations()
 {
-    throw Error("Unexpected test process restart")
+    global TestPrivacyCancellations
+    TestPrivacyCancellations += 1
 }
+
 
 PositionResultWindowAtMouse()
 {
@@ -1556,12 +1593,6 @@ PositionResultWindowAtMouse()
 
 MoveWindowPhysical(*)
 {
-}
-
-ShowOnlineServicesPrivacyDialog(*)
-{
-    global TestHelpCalls
-    TestHelpCalls.Push("privacy")
 }
 
 ShowAboutDialog(*)

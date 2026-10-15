@@ -18,7 +18,7 @@ function Get-SourceBlock([string]$start, [string]$end) {
 
 try {
     $settings = Get-SourceBlock 'global CONFIG :=' 'global IS_PACKAGED :='
-    $menuGlobals = Get-SourceBlock 'global TranslationServiceTrayMenu :=' 'global SpeechAudioPath :='
+    $menuGlobals = Get-SourceBlock 'global SettingsDialog :=' 'global SpeechAudioPath :='
     $globals = Get-SourceBlock 'global SpeechAudioPath :=' 'LoadConfig()'
     $speech = Get-SourceBlock "`nStartEdgeSpeech(text, voice)`n" "`nCleanupSpeech(*)`n"
     $speech = $speech.Replace('TrayTip(', 'TestTrayTip(')
@@ -26,14 +26,11 @@ try {
     $tray = Get-SourceBlock "`nSetupTrayMenu()`n{`n" "`nShowAboutDialog(*)`n"
     $configFunctions = Get-SourceBlock "`nLoadConfig()`n{`n" "`nEnsureConfiguredElevation()`n"
     $voiceFunctions = Get-SourceBlock "`nSetSpeechVoice(voice, *)`n" "`nToggleInputPinned("
-    $format = Get-SourceBlock "`nFormatHotkey(hotkey)`n" "`nToggleAutostart(*)`n"
-    $autostartAction = Get-SourceBlock "`nToggleAutostart(*)`n" "`nIsAutostartEnabled()`n"
-    $autostartAction = $autostartAction.Replace('MsgBox(', 'TestSettingsMessage(')
-    $adminAction = Get-SourceBlock "`nToggleRunAsAdmin(*)`n" "`nGetLaunchCommand("
-    $adminAction = $adminAction.Replace('global CONFIG, SettingsTrayMenu', 'global CONFIG, SettingsTrayMenu, TestIsAdmin')
-    $adminAction = $adminAction.Replace('A_IsAdmin', 'TestIsAdmin').Replace('MsgBox(', 'TestSettingsMessage(')
-    $adminAction = $adminAction.Replace('Run(GetLaunchCommand(true), A_ScriptDir)', 'TestAdminRestart()').Replace('ExitApp()', 'TestRestartExit()')
-    $resultPositionAction = Get-SourceBlock "`nToggleResultAtMouse(*)`n" "`nTranslateFromHotkey(*)`n"
+    $format = Get-SourceBlock "`nFormatHotkey(hotkey)`n" "`nSetAutostartEnabled(enabled)`n"
+    $autostartAction = Get-SourceBlock "`nSetAutostartEnabled(enabled)`n" "`nIsAutostartEnabled()`n"
+    $resultPositionAction = Get-SourceBlock "`nApplyResultPositionSetting(enabled)`n" "`nTranslateFromHotkey(*)`n"
+    $privacyActions = Get-SourceBlock "`nSetOnlineServicesConsent(enabled, privacyWindow, *)`n" "`nEnsureOnlineServicesConsent()`n"
+    $privacyActions = $privacyActions.Replace('TrayTip(', 'TestTrayTip(')
     $startup = "`nTestStartup()`n{`n" + (Get-SourceBlock "`nSetupTrayMenu()`nif" "`nSetApplicationIcon()`n{`n") + "`n}`n"
     $inputFunctions = Get-SourceBlock "`nPromptForText(" "`nSetSpeechVoice(voice, *)`n"
     if ($TextButtons) {
@@ -59,16 +56,21 @@ try {
     $resultResize = Get-SourceBlock "`nResizeResultWindow(" "`nclass JsonParser`n"
     $windowRect = Get-SourceBlock "`nGetPhysicalWindowRect(" "`nMoveWindowPhysical("
     $appearance = Get-SourceBlock "`nGetAppearancePalette()`n" "`nApplyAppearanceToOpenWindows()`n"
-    $dropDownTheme = Get-SourceBlock "`nSetPreferredAppColorMode(" "`nApplyAppearanceToExistingWindow("
+    $dropDownTheme = Get-SourceBlock "`nSetPreferredAppColorMode(" "`nRedrawGuiWindow("
     $redraw = Get-SourceBlock "`nRedrawGuiWindow(" "`nResizeResultWindow("
+    $settingsModule = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '..\settings\Settings.ahk')).Replace("`r`n", "`n")
+    $restartStart = $settingsModule.IndexOf("`nOfferSettingsRestart(runAsAdmin)`n{")
+    $restartEnd = $settingsModule.IndexOf("`nWriteSettingsConfig(settings)", $restartStart)
+    $settingsModule = $settingsModule.Remove($restartStart, $restartEnd - $restartStart)
     $tests = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'speech-tests.ahk'))
     $testPath = Join-Path $testDirectory 'speech-tests.ahk'
     [IO.File]::WriteAllText($testPath, "#Requires AutoHotkey v2.0`n#Warn All, StdOut`n" +
         '#Include ' + (Join-Path $PSScriptRoot '..\speech\EdgeSpeechToken.ahk') + "`n" +
         '#Include ' + (Join-Path $PSScriptRoot '..\settings\Hotkeys.ahk') + "`n" +
+        $settingsModule + "`n" +
         $settings + $menuGlobals + $globals + $tests + $speech + $worker + $tray +
-        $configFunctions + $voiceFunctions + $format + $autostartAction + $adminAction +
-        $resultPositionAction + $startup + $inputFunctions +
+        $configFunctions + $voiceFunctions + $format + $autostartAction +
+        $resultPositionAction + $privacyActions + $startup + $inputFunctions +
         $inputEvents + $speakText + $translationStart + $translationEvents + $hideResult +
         $resultCreate + $resultCommands + $resultResize +
         $windowRect + $appearance + $dropDownTheme + $redraw, [Text.UTF8Encoding]::new($true))

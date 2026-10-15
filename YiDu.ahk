@@ -2,6 +2,7 @@
 #SingleInstance Off
 #Include speech\EdgeSpeechToken.ahk
 #Include settings\Hotkeys.ahk
+#Include settings\Settings.ahk
 ;@Ahk2Exe-SetName 译读
 ;@Ahk2Exe-SetCompanyName zero-ljz（空心）
 ;@Ahk2Exe-SetDescription 译读
@@ -89,12 +90,7 @@ global PrivacyGui := 0
 global ActiveInputDialog := 0
 global InputDrafts := Map()
 global ActiveTranslationRequest := 0
-global TranslationServiceTrayMenu := 0
-global SpeechVoiceTrayMenu := 0
-global SpeechSpeedTrayMenu := 0
-global ColorThemeTrayMenu := 0
-global SettingsTrayMenu := 0
-global HotkeySettingsDialog := 0
+global SettingsDialog := 0
 global SpeechAudioPath := ""
 global SpeechErrorPath := ""
 global SpeechDonePath := ""
@@ -509,13 +505,7 @@ RegisterSpeakHotkey()
 
 SetupTrayMenu()
 {
-    global CONFIG, IS_PACKAGED, ShowResultAtMouse
-    global TRANSLATION_SERVICES, SPEECH_VOICES
-    global TranslationServiceTrayMenu, SpeechVoiceTrayMenu, ColorThemeTrayMenu
-    global SpeechTrayMenuReady
-    global SPEECH_SPEEDS, SpeechSpeedTrayMenu
-    global SpeechPauseMenuLabel
-    global SettingsTrayMenu
+    global CONFIG, SpeechTrayMenuReady, SpeechPauseMenuLabel
 
     A_TrayMenu.Delete()
     translateHotkeyText := FormatHotkey(CONFIG.Hotkey)
@@ -531,62 +521,8 @@ SetupTrayMenu()
     UpdateSpeechTrayState()
     A_TrayMenu.Add()
 
-    TranslationServiceTrayMenu := Menu()
-
-    for item in TRANSLATION_SERVICES
-    {
-        TranslationServiceTrayMenu.Add(
-            item.Label,
-            SetTranslationService.Bind(item.Service)
-        )
-    }
-
-    UpdateTranslationServiceTrayChecks()
-    A_TrayMenu.Add("翻译服务", TranslationServiceTrayMenu)
-
-    SpeechVoiceTrayMenu := Menu()
-
-    for item in SPEECH_VOICES
-        SpeechVoiceTrayMenu.Add(item.Label, SetSpeechVoice.Bind(item.Voice))
-
-    UpdateSpeechVoiceTrayChecks()
-    A_TrayMenu.Add("朗读音色", SpeechVoiceTrayMenu)
-    SpeechSpeedTrayMenu := Menu()
-    for item in SPEECH_SPEEDS
-        SpeechSpeedTrayMenu.Add(item.Label, SetSpeechSpeed.Bind(item.Value))
-    UpdateSpeechSpeedControls()
-    A_TrayMenu.Add("朗读速度", SpeechSpeedTrayMenu)
-
-    ColorThemeTrayMenu := Menu()
-    ColorThemeTrayMenu.Add("跟随系统", SetColorTheme.Bind("system"))
-    ColorThemeTrayMenu.Add("深色", SetColorTheme.Bind("dark"))
-    ColorThemeTrayMenu.Add("浅色", SetColorTheme.Bind("light"))
-    UpdateColorThemeTrayChecks()
-    SettingsTrayMenu := Menu()
-    SettingsTrayMenu.Add("主题", ColorThemeTrayMenu)
-    SettingsTrayMenu.Add("窗口半透明", ToggleWindowTransparency)
-    if CONFIG.WindowTransparency
-        SettingsTrayMenu.Check("窗口半透明")
-    SettingsTrayMenu.Add("翻译结果显示在鼠标旁", ToggleResultAtMouse)
-    if ShowResultAtMouse
-        SettingsTrayMenu.Check("翻译结果显示在鼠标旁")
-    SettingsTrayMenu.Add("快捷键", ShowHotkeySettings)
-    SettingsTrayMenu.Add()
-    SettingsTrayMenu.Add("开机自启", ToggleAutostart)
-
-    if !IS_PACKAGED
-        SettingsTrayMenu.Add("以管理员身份启动", ToggleRunAsAdmin)
-
-    if IsAutostartEnabled()
-        SettingsTrayMenu.Check("开机自启")
-
-    if !IS_PACKAGED && CONFIG.RunAsAdmin
-        SettingsTrayMenu.Check("以管理员身份启动")
-
-    A_TrayMenu.Add()
-    A_TrayMenu.Add("设置", SettingsTrayMenu)
+    A_TrayMenu.Add("设置", ShowSettings.Bind(1))
     A_TrayMenu.Add("打开数据目录", OpenDataDirectory)
-    A_TrayMenu.Add("在线服务与隐私", ShowOnlineServicesPrivacyDialog)
     A_TrayMenu.Add("关于译读", ShowAboutDialog)
     A_TrayMenu.Add()
     A_TrayMenu.Add("退出", (*) => ExitApp())
@@ -668,63 +604,6 @@ OpenDataDirectory(*)
     {
         MsgBox("打开数据目录失败：`n" . err.Message, "译读", "Icon!")
     }
-}
-
-
-SetColorTheme(theme, *)
-{
-    global CONFIG
-
-    theme := StrLower(theme)
-
-    if theme != "system" && theme != "dark" && theme != "light"
-        return
-
-    CONFIG.ColorTheme := theme
-    WriteConfigSetting("ColorTheme", theme)
-    UpdateColorThemeTrayChecks()
-    ApplyAppearanceToOpenWindows()
-}
-
-
-UpdateColorThemeTrayChecks()
-{
-    global CONFIG, ColorThemeTrayMenu
-
-    if !IsObject(ColorThemeTrayMenu)
-        return
-
-    ColorThemeTrayMenu.Uncheck("跟随系统")
-    ColorThemeTrayMenu.Uncheck("深色")
-    ColorThemeTrayMenu.Uncheck("浅色")
-
-    selectedLabel := "跟随系统"
-
-    if CONFIG.ColorTheme = "dark"
-        selectedLabel := "深色"
-    else if CONFIG.ColorTheme = "light"
-        selectedLabel := "浅色"
-
-    ColorThemeTrayMenu.Check(selectedLabel)
-}
-
-
-ToggleWindowTransparency(*)
-{
-    global CONFIG, SettingsTrayMenu
-
-    CONFIG.WindowTransparency := !CONFIG.WindowTransparency
-    WriteConfigSetting(
-        "WindowTransparency",
-        CONFIG.WindowTransparency ? 1 : 0
-    )
-
-    if CONFIG.WindowTransparency
-        SettingsTrayMenu.Check("窗口半透明")
-    else
-        SettingsTrayMenu.Uncheck("窗口半透明")
-
-    ApplyAppearanceToOpenWindows()
 }
 
 
@@ -814,12 +693,6 @@ CloseAboutDialog(aboutWindow, *)
 }
 
 
-ShowOnlineServicesPrivacyDialog(*)
-{
-    OpenOnlineServicesPrivacyDialog(false)
-}
-
-
 OpenOnlineServicesPrivacyDialog(firstRun := false)
 {
     global CONFIG, PrivacyGui
@@ -866,7 +739,7 @@ OpenOnlineServicesPrivacyDialog(firstRun := false)
     privacyWindow.AddText(
         "xm y+12 w500",
         "文本可能包含个人或敏感信息。译读不保存翻译历史，"
-            . "你可以随时从托盘菜单撤回同意。"
+            . "你可以随时在设置的‘翻译与朗读’页撤回同意。"
     )
     privacyWindow.SetFont("s9 c" . palette.MutedText, "Microsoft YaHei UI")
     privacyLink := privacyWindow.AddLink(
@@ -938,12 +811,13 @@ OpenOnlineServicesPrivacyDialog(firstRun := false)
 
 SetOnlineServicesConsent(enabled, privacyWindow, *)
 {
-    global CONFIG
+    global CONFIG, SettingsDialog
 
+    WriteSettingsConfig(Map("PrivacyChoiceMade", 1, "OnlineServicesConsent", enabled ? 1 : 0))
     CONFIG.PrivacyChoiceMade := true
     CONFIG.OnlineServicesConsent := enabled
-    WriteConfigSetting("PrivacyChoiceMade", 1)
-    WriteConfigSetting("OnlineServicesConsent", enabled ? 1 : 0)
+    if IsObject(SettingsDialog)
+        SettingsDialog.Consent.Value := enabled
 
     if enabled
         SetTimer(EnsureSpeechWorker, -1)
@@ -977,7 +851,10 @@ EnsureOnlineServicesConsent()
     if CONFIG.OnlineServicesConsent
         return true
 
-    OpenOnlineServicesPrivacyDialog(false)
+    if CONFIG.PrivacyChoiceMade
+        ShowSettings(2)
+    else
+        OpenOnlineServicesPrivacyDialog(true)
     TrayTip("请先决定是否启用在线服务。", "译读", 1)
     return false
 }
@@ -1241,35 +1118,16 @@ FormatHotkeyKey(key)
 }
 
 
-ToggleAutostart(*)
+SetAutostartEnabled(enabled)
 {
-    global AUTOSTART_SHORTCUT, IS_PACKAGED, SettingsTrayMenu
+    global AUTOSTART_SHORTCUT, IS_PACKAGED
 
-    try
-    {
-        if IsAutostartEnabled()
-        {
-            if IS_PACKAGED
-                SetPackagedAutostart(false)
-            else
-                FileDelete(AUTOSTART_SHORTCUT)
-
-            SettingsTrayMenu.Uncheck("开机自启")
-        }
-        else
-        {
-            if IS_PACKAGED
-                SetPackagedAutostart(true)
-            else
-                CreateAutostartShortcut()
-
-            SettingsTrayMenu.Check("开机自启")
-        }
-    }
-    catch Error as err
-    {
-        MsgBox("修改开机自启失败：`n" . err.Message, "译读", "Icon!")
-    }
+    if IS_PACKAGED
+        SetPackagedAutostart(enabled)
+    else if enabled
+        CreateAutostartShortcut()
+    else if FileExist(AUTOSTART_SHORTCUT)
+        FileDelete(AUTOSTART_SHORTCUT)
 }
 
 
@@ -1349,51 +1207,6 @@ CreateAutostartShortcut()
 }
 
 
-ToggleRunAsAdmin(*)
-{
-    global CONFIG, SettingsTrayMenu
-
-    newValue := !CONFIG.RunAsAdmin
-
-    try WriteConfigSetting("RunAsAdmin", newValue ? 1 : 0)
-    catch Error as err
-    {
-        MsgBox("保存管理员启动设置失败：`n" . err.Message, "译读", "Icon!")
-        return
-    }
-
-    CONFIG.RunAsAdmin := newValue
-
-    if !CONFIG.RunAsAdmin
-    {
-        SettingsTrayMenu.Uncheck("以管理员身份启动")
-        return
-    }
-
-    SettingsTrayMenu.Check("以管理员身份启动")
-
-    if A_IsAdmin
-        return
-
-    try
-    {
-        Run(GetLaunchCommand(true), A_ScriptDir)
-        ExitApp()
-    }
-    catch Error as err
-    {
-        CONFIG.RunAsAdmin := false
-        try WriteConfigSetting("RunAsAdmin", 0)
-        SettingsTrayMenu.Uncheck("以管理员身份启动")
-        MsgBox(
-            "未能以管理员身份重新启动，已撤销该设置：`n" . err.Message,
-            "译读",
-            "Icon!"
-        )
-    }
-}
-
-
 GetLaunchCommand(runAsAdmin := false)
 {
     prefix := runAsAdmin ? "*RunAs " : ""
@@ -1414,20 +1227,15 @@ QuoteCommandArgument(value)
 }
 
 
-ToggleResultAtMouse(*)
+ApplyResultPositionSetting(enabled)
 {
-    global CONFIG, ResultGui, ShowResultAtMouse, ResultManualPosition
-    global SettingsTrayMenu
-
-    menuText := "翻译结果显示在鼠标旁"
-    ShowResultAtMouse := !ShowResultAtMouse
-    CONFIG.ShowResultAtMouse := ShowResultAtMouse
-    WriteConfigSetting("ShowResultAtMouse", ShowResultAtMouse ? 1 : 0)
+    global ResultGui, ShowResultAtMouse, ResultManualPosition
+    if ShowResultAtMouse = enabled
+        return
+    ShowResultAtMouse := enabled
 
     if ShowResultAtMouse
     {
-        SettingsTrayMenu.Check(menuText)
-
         if IsObject(ResultGui)
         {
             try
@@ -1445,8 +1253,6 @@ ToggleResultAtMouse(*)
     }
     else
     {
-        SettingsTrayMenu.Uncheck(menuText)
-
         if IsObject(ResultGui) && IsObject(ResultManualPosition)
         {
             try MoveWindowPhysical(
@@ -1973,7 +1779,6 @@ SetSpeechVoice(voice, *)
 
     CONFIG.SpeechVoice := voice
     WriteConfigSetting("SpeechVoice", CONFIG.SpeechVoice)
-    UpdateSpeechVoiceTrayChecks()
 }
 
 
@@ -2008,16 +1813,7 @@ SetSpeechSpeed(speed, *)
 
 UpdateSpeechSpeedControls()
 {
-    global CONFIG, SPEECH_SPEEDS, SpeechSpeedTrayMenu, ActiveInputDialog
-    if IsObject(SpeechSpeedTrayMenu)
-    {
-        for item in SPEECH_SPEEDS
-        {
-            SpeechSpeedTrayMenu.Uncheck(item.Label)
-            if item.Value = CONFIG.SpeechSpeed
-                SpeechSpeedTrayMenu.Check(item.Label)
-        }
-    }
+    global ActiveInputDialog
 
     if IsObject(ActiveInputDialog) && IsObject(ActiveInputDialog.SpeedButton)
         ActiveInputDialog.SpeedButton.Text := GetSpeechSpeedLabel()
@@ -2033,41 +1829,6 @@ SetTranslationService(service, *)
 
     CONFIG.TranslationService := service
     WriteConfigSetting("TranslationService", CONFIG.TranslationService)
-    UpdateTranslationServiceTrayChecks()
-}
-
-
-UpdateSpeechVoiceTrayChecks()
-{
-    global CONFIG, SPEECH_VOICES, SpeechVoiceTrayMenu
-
-    if !IsObject(SpeechVoiceTrayMenu)
-        return
-
-    for item in SPEECH_VOICES
-    {
-        SpeechVoiceTrayMenu.Uncheck(item.Label)
-
-        if item.Voice = CONFIG.SpeechVoice
-            SpeechVoiceTrayMenu.Check(item.Label)
-    }
-}
-
-
-UpdateTranslationServiceTrayChecks()
-{
-    global CONFIG, TRANSLATION_SERVICES, TranslationServiceTrayMenu
-
-    if !IsObject(TranslationServiceTrayMenu)
-        return
-
-    for item in TRANSLATION_SERVICES
-    {
-        TranslationServiceTrayMenu.Uncheck(item.Label)
-
-        if item.Service = CONFIG.TranslationService
-            TranslationServiceTrayMenu.Check(item.Label)
-    }
 }
 
 
@@ -2408,7 +2169,11 @@ DrawDropDownItem(wParam, lParam, message, hwnd)
     static DT_VCENTER_SINGLELINE_END_ELLIPSIS_NOPREFIX := 0x8824
 
     if NumGet(lParam, 0, "UInt") = 4
+    {
+        if DrawSettingsPageButton(lParam)
+            return true
         return DrawIconButton(lParam)
+    }
     if NumGet(lParam, 0, "UInt") != ODT_COMBOBOX
         return
 
@@ -4550,10 +4315,13 @@ GetAppearancePalette()
 
 GetEffectiveColorTheme()
 {
-    global CONFIG
+    global CONFIG, SettingsDialog
 
-    if CONFIG.ColorTheme != "system"
-        return CONFIG.ColorTheme
+    theme := IsObject(SettingsDialog)
+        ? ["system", "dark", "light"][SettingsDialog.ThemeList.Value]
+        : CONFIG.ColorTheme
+    if theme != "system"
+        return theme
 
     try
     {
@@ -4618,10 +4386,14 @@ ApplyWindowTheme(guiObject, controls*)
 
 ApplyWindowTransparency(guiObject)
 {
-    global CONFIG
+    global CONFIG, SettingsDialog
+
+    enabled := IsObject(SettingsDialog)
+        ? SettingsDialog.Transparency.Value
+        : CONFIG.WindowTransparency
 
     try WinSetTransparent(
-        CONFIG.WindowTransparency ? 235 : "Off",
+        enabled ? 235 : "Off",
         "ahk_id " . guiObject.Hwnd
     )
 }
@@ -4630,10 +4402,10 @@ ApplyWindowTransparency(guiObject)
 ApplyAppearanceToOpenWindows()
 {
     global ResultGui, AboutGui, PrivacyGui, ActiveInputDialog
-    global HotkeySettingsDialog
+    global SettingsDialog
 
-    if IsObject(HotkeySettingsDialog)
-        ApplyAppearanceToExistingWindow(HotkeySettingsDialog.Gui)
+    if IsObject(SettingsDialog)
+        ApplySettingsAppearance(SettingsDialog)
 
     if IsObject(ResultGui)
         ApplyAppearanceToExistingWindow(ResultGui)

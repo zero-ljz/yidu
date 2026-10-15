@@ -1,123 +1,4 @@
-ShowHotkeySettings(*)
-{
-    global CONFIG, HotkeySettingsDialog
-
-    if IsObject(HotkeySettingsDialog)
-    {
-        WinActivate("ahk_id " . HotkeySettingsDialog.Gui.Hwnd)
-        return
-    }
-
-    palette := GetAppearancePalette()
-    windowWidth := 360
-    margin := 10
-    gap := 8
-    buttonHeight := 26
-    labelWidth := 40
-    fieldWidth := windowWidth - margin * 2 - labelWidth - gap
-    window := Gui("-MinimizeBox -MaximizeBox", "快捷键设置")
-    window.MarginX := margin
-    window.MarginY := margin
-    window.BackColor := palette.WindowBackground
-    window.SetFont("s10 c" . palette.Text, "Microsoft YaHei UI")
-    window.AddText("xm ym w" . labelWidth . " h" . buttonHeight . " +0x200", "翻译")
-    translationButton := window.AddButton("x+" . gap . " yp w" . fieldWidth . " h" . buttonHeight, FormatHotkey(CONFIG.Hotkey))
-    window.AddText("xm y+" . gap . " w" . labelWidth . " h" . buttonHeight . " +0x200", "朗读")
-    speechButton := window.AddButton("x+" . gap . " yp w" . fieldWidth . " h" . buttonHeight, FormatHotkey(CONFIG.SpeakHotkey))
-    window.SetFont("s9 c" . palette.MutedText)
-    hint := window.AddText("xm y+8 w340 h18", "点击按键录入；Esc 取消，Backspace 清除。")
-    window.SetFont("s10 c" . palette.Text)
-    errorText := window.AddText("xm y+8 w340 h40 Hidden cD84A4A", "")
-    restoreButton := window.AddButton("xm w72 h" . buttonHeight, "恢复默认")
-    saveButton := window.AddButton("x+8 yp w72 h" . buttonHeight . " Default", "保存")
-    cancelButton := window.AddButton("x+8 yp w52 h" . buttonHeight, "取消")
-    dialog := {
-        Gui: window, TranslationButton: translationButton, SpeechButton: speechButton,
-        TranslationHotkey: CONFIG.Hotkey, SpeechHotkey: CONFIG.SpeakHotkey,
-        ErrorText: errorText, Hint: hint, RestoreButton: restoreButton,
-        SaveButton: saveButton, CancelButton: cancelButton,
-        Width: windowWidth, Hook: 0, Recording: ""
-    }
-    translationButton.OnEvent("Click", StartHotkeyRecording.Bind(dialog, "Translation"))
-    speechButton.OnEvent("Click", StartHotkeyRecording.Bind(dialog, "Speech"))
-    restoreButton.OnEvent("Click", RestoreHotkeyDefaults.Bind(dialog))
-    saveButton.OnEvent("Click", SaveHotkeySettings.Bind(dialog))
-    cancelButton.OnEvent("Click", CloseHotkeySettings.Bind(dialog))
-    window.OnEvent("Close", CloseHotkeySettings.Bind(dialog))
-    window.OnEvent("Escape", CloseHotkeySettings.Bind(dialog))
-    ApplyWindowTheme(window, translationButton, speechButton, restoreButton, saveButton, cancelButton)
-    HotkeySettingsDialog := dialog
-    try
-    {
-        SetConfiguredHotkeysEnabled(false)
-        OnMessage(0x0006, HandleHotkeySettingsActivation)
-        LayoutHotkeySettings(dialog, true)
-        ApplyWindowTransparency(window)
-    }
-    catch
-    {
-        CloseHotkeySettings(dialog)
-        throw
-    }
-}
-
-
-LayoutHotkeySettings(dialog, activate := false)
-{
-    ; Match input/result windows: 10px margins, 8px gaps, measured button widths.
-    margin := dialog.Gui.MarginX
-    gap := 8
-    dialog.Hint.GetPos(, &hintY, , &hintHeight)
-    actionY := hintY + hintHeight + gap
-    hasMessage := dialog.ErrorText.Text != ""
-    dialog.ErrorText.Visible := hasMessage
-    if hasMessage
-    {
-        dialog.ErrorText.Move(margin, actionY)
-        dialog.ErrorText.GetPos(, , , &messageHeight)
-        actionY += messageHeight + gap
-    }
-    dialog.SaveButton.GetPos(, , &saveWidth, &buttonHeight)
-    dialog.CancelButton.GetPos(, , &cancelWidth)
-    dialog.RestoreButton.Move(margin, actionY)
-    dialog.SaveButton.Move(dialog.Width - margin - cancelWidth - gap - saveWidth, actionY)
-    dialog.CancelButton.Move(dialog.Width - margin - cancelWidth, actionY)
-    dialog.Gui.Show("w" . dialog.Width . " h" . (actionY + buttonHeight + margin) . (activate ? "" : " NA"))
-}
-
-
-SetHotkeySettingsMessage(dialog, message)
-{
-    dialog.ErrorText.Text := message
-    LayoutHotkeySettings(dialog)
-}
-
-
-CloseHotkeySettings(dialog, *)
-{
-    global HotkeySettingsDialog
-
-    if !IsObject(HotkeySettingsDialog) || HotkeySettingsDialog != dialog
-        return
-
-    StopHotkeyRecording(dialog)
-    OnMessage(0x0006, HandleHotkeySettingsActivation, 0)
-    HotkeySettingsDialog := 0
-    try dialog.Gui.Destroy()
-    SetConfiguredHotkeysEnabled(true)
-}
-
-
-HandleHotkeySettingsActivation(wParam, lParam, message, hwnd)
-{
-    global HotkeySettingsDialog
-
-    if IsObject(HotkeySettingsDialog) && hwnd = HotkeySettingsDialog.Gui.Hwnd
-        && (wParam & 0xFFFF) = 0
-        StopHotkeyRecording(HotkeySettingsDialog)
-}
-
-
+; Keyboard capture and transactional rebinding shared by the settings window.
 SetConfiguredHotkeysEnabled(enabled)
 {
     global CONFIG
@@ -131,7 +12,7 @@ SetConfiguredHotkeysEnabled(enabled)
 StartHotkeyRecording(dialog, field, *)
 {
     StopHotkeyRecording(dialog)
-    SetHotkeySettingsMessage(dialog, "")
+    SetSettingsMessage(dialog, "")
     dialog.Recording := field
     dialog.Candidate := ""
     dialog.MainKeyDown := false
@@ -238,10 +119,10 @@ RecordHotkeyKeyDown(dialog, hook, vk, sc)
     try ValidateHotkeySetting(candidate)
     catch Error as err
     {
-        SetHotkeySettingsMessage(dialog, err.Message)
+        SetSettingsMessage(dialog, err.Message)
         return
     }
-    SetHotkeySettingsMessage(dialog, "")
+    SetSettingsMessage(dialog, "")
     dialog.Candidate := candidate
     dialog.MainKey := vk
     dialog.MainKeyDown := true
@@ -274,21 +155,7 @@ RestoreHotkeyDefaults(dialog, *)
     dialog.SpeechHotkey := "^F2"
     dialog.TranslationButton.Text := FormatHotkey(dialog.TranslationHotkey)
     dialog.SpeechButton.Text := FormatHotkey(dialog.SpeechHotkey)
-    SetHotkeySettingsMessage(dialog, "")
-}
-
-
-SaveHotkeySettings(dialog, *)
-{
-    StopHotkeyRecording(dialog)
-    try ApplyHotkeySettings(dialog.TranslationHotkey, dialog.SpeechHotkey)
-    catch Error as err
-    {
-        SetHotkeySettingsMessage(dialog, err.Message)
-        return false
-    }
-    CloseHotkeySettings(dialog)
-    return true
+    SetSettingsMessage(dialog, "")
 }
 
 
@@ -322,9 +189,9 @@ CanonicalHotkey(hotkey)
 }
 
 
-ApplyHotkeySettings(translationHotkey, speechHotkey)
+ApplyHotkeySettings(translationHotkey, speechHotkey, settings := 0)
 {
-    global CONFIG, HotkeySettingsDialog
+    global CONFIG, SettingsDialog
 
     oldTranslation := CONFIG.Hotkey
     oldSpeech := CONFIG.SpeakHotkey
@@ -345,16 +212,20 @@ ApplyHotkeySettings(translationHotkey, speechHotkey)
         {
             Hotkey(translationHotkey, TranslateFromHotkey, "On")
             Hotkey(speechHotkey, SpeakFromHotkey, "On")
-            WriteHotkeyConfig(translationHotkey, speechHotkey)
+            if !IsObject(settings)
+                settings := Map()
+            settings["Hotkey"] := translationHotkey
+            settings["SpeakHotkey"] := speechHotkey
+            WriteSettingsConfig(settings)
         }
         catch Error
         {
             try Hotkey(translationHotkey, "Off")
             try Hotkey(speechHotkey, "Off")
-            state := IsObject(HotkeySettingsDialog) ? "Off" : "On"
+            state := IsObject(SettingsDialog) ? "Off" : "On"
             Hotkey(oldTranslation, TranslateFromHotkey, state)
             Hotkey(oldSpeech, SpeakFromHotkey, state)
-            throw Error("无法保存快捷键，原设置已保留。`n请检查组合键或配置文件是否可写。")
+            throw Error("无法保存设置，原设置已保留。`n请检查组合键或配置文件是否可写。")
         }
         CONFIG.Hotkey := translationHotkey
         CONFIG.SpeakHotkey := speechHotkey
@@ -370,21 +241,5 @@ ApplyHotkeySettings(translationHotkey, speechHotkey)
 
 WriteHotkeyConfig(translationHotkey, speechHotkey)
 {
-    global CONFIG_PATH
-
-    EnsureConfigDirectory()
-    temporaryPath := CONFIG_PATH . ".hotkeys." . DllCall("GetCurrentProcessId", "UInt") . ".tmp"
-    try
-    {
-        FileCopy(CONFIG_PATH, temporaryPath, true)
-        FileSetAttrib("-R", temporaryPath)
-        IniWrite(translationHotkey, temporaryPath, "Settings", "Hotkey")
-        IniWrite(speechHotkey, temporaryPath, "Settings", "SpeakHotkey")
-        FileMove(temporaryPath, CONFIG_PATH, true)
-    }
-    finally
-    {
-        if FileExist(temporaryPath)
-            FileDelete(temporaryPath)
-    }
+    WriteSettingsConfig(Map("Hotkey", translationHotkey, "SpeakHotkey", speechHotkey))
 }
