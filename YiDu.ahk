@@ -1,5 +1,6 @@
 #Requires AutoHotkey v2.0
 #SingleInstance Off
+#Include speech\EdgeSpeechToken.ahk
 ;@Ahk2Exe-SetName 译读
 ;@Ahk2Exe-SetCompanyName zero-ljz（空心）
 ;@Ahk2Exe-SetDescription 译读
@@ -4030,6 +4031,8 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 
+__TOKEN_HELPER__
+
 public sealed class PrefixStream : Stream
 {
     private readonly Stream inner;
@@ -4087,33 +4090,29 @@ public sealed class PrefixStream : Stream
 
 '@
 $trustedToken = '6A5AA1D4EAFF4E9FB37E23D68491D6F4'
+# Keep the tested protocol version and User-Agent paired, independently of local Edge updates.
 $edgeVersion = '143.0.3650.75'
-$edgePaths = @(
-    (Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe'),
-    (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe'),
-    (Join-Path $env:LOCALAPPDATA 'Microsoft\Edge\Application\msedge.exe'))
-
-foreach ($edgePath in $edgePaths) {
-    if ($edgePath -and (Test-Path -LiteralPath $edgePath)) {
-        $installedVersion = (Get-Item -LiteralPath $edgePath).VersionInfo.ProductVersion
-        if ($installedVersion) { $edgeVersion = $installedVersion }
-        break
-    }
-}
-
+$script:edgeClockSkewSeconds = 0L
 $edgeMajor = $edgeVersion.Split('.')[0]
 $userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
     'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/' + $edgeMajor +
     '.0.0.0 Safari/537.36 Edg/' + $edgeMajor + '.0.0.0'
 
 function Get-SecMsGec {
-    $seconds = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + 11644473600
-    $seconds -= $seconds % 300
-    $ticks = [Int64]$seconds * 10000000
-    $bytes = [Text.Encoding]::ASCII.GetBytes(([string]$ticks) + $trustedToken)
-    $sha = [Security.Cryptography.SHA256]::Create()
-    try { return ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '') }
-    finally { $sha.Dispose() }
+    $seconds = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() + $script:edgeClockSkewSeconds
+    return [EdgeSpeechToken]::Generate($seconds, $trustedToken)
+}
+
+function Update-EdgeSpeechClock([string]$responseHeaders) {
+    if ($responseHeaders -match '(?im)^Date:\s*([^\r\n]+)\r?$') {
+        $serverTime = [DateTimeOffset]::MinValue
+        if ([DateTimeOffset]::TryParseExact($Matches[1].Trim(), 'r',
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$serverTime)) {
+            $script:edgeClockSkewSeconds = $serverTime.ToUnixTimeSeconds() -
+                [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+        }
+    }
 }
 
 function Get-EdgeTimestamp {
@@ -4135,90 +4134,110 @@ function Send-WebSocketText($socket, [string]$message) {
 function Open-EdgeWebSocket([string]$uri) {
     $requestUri = [Uri]$uri
     $tcp = [Net.Sockets.TcpClient]::new()
-    $tcp.Connect($requestUri.Host, 443)
-    $ssl = [Net.Security.SslStream]::new($tcp.GetStream(), $false)
-    $ssl.AuthenticateAsClient($requestUri.Host)
-    $keyBytes = [byte[]]::new(16)
-    [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($keyBytes)
-    $webSocketKey = [Convert]::ToBase64String($keyBytes)
-    $crlf = [char]13 + [char]10
-    $handshake = 'GET ' + $requestUri.PathAndQuery + ' HTTP/1.1' + $crlf +
-        'Host: ' + $requestUri.Host + $crlf +
-        'Connection: Upgrade' + $crlf +
-        'Pragma: no-cache' + $crlf +
-        'Cache-Control: no-cache' + $crlf +
-        'User-Agent: ' + $userAgent + $crlf +
-        'Upgrade: websocket' + $crlf +
-        'Origin: chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold' + $crlf +
-        'Sec-WebSocket-Version: 13' + $crlf +
-        'Accept-Encoding: gzip, deflate, br' + $crlf +
-        'Accept-Language: en-US,en;q=0.9' + $crlf +
-        'Cookie: muid=' + [Guid]::NewGuid().ToString('N').ToUpperInvariant() + ';' +
-        $crlf + 'Sec-WebSocket-Key: ' + $webSocketKey + $crlf + $crlf
-    $requestBytes = [Text.Encoding]::ASCII.GetBytes($handshake)
-    $ssl.Write($requestBytes, 0, $requestBytes.Length)
-    $ssl.Flush()
+    $ssl = $null
+    $headerStream = $null
+    try {
+        $tcp.Connect($requestUri.Host, 443)
+        $ssl = [Net.Security.SslStream]::new($tcp.GetStream(), $false)
+        $ssl.AuthenticateAsClient($requestUri.Host)
+        $ssl.ReadTimeout = 15000
+        $ssl.WriteTimeout = 15000
+        $keyBytes = [byte[]]::new(16)
+        $random = [Security.Cryptography.RandomNumberGenerator]::Create()
+        try { $random.GetBytes($keyBytes) } finally { $random.Dispose() }
+        $webSocketKey = [Convert]::ToBase64String($keyBytes)
+        $crlf = [char]13 + [char]10
+        $handshake = 'GET ' + $requestUri.PathAndQuery + ' HTTP/1.1' + $crlf +
+            'Host: ' + $requestUri.Host + $crlf +
+            'Connection: Upgrade' + $crlf +
+            'Pragma: no-cache' + $crlf +
+            'Cache-Control: no-cache' + $crlf +
+            'User-Agent: ' + $userAgent + $crlf +
+            'Upgrade: websocket' + $crlf +
+            'Origin: chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold' + $crlf +
+            'Sec-WebSocket-Version: 13' + $crlf +
+            'Accept-Encoding: gzip, deflate, br' + $crlf +
+            'Accept-Language: en-US,en;q=0.9' + $crlf +
+            'Cookie: muid=' + [Guid]::NewGuid().ToString('N').ToUpperInvariant() + ';' +
+            $crlf + 'Sec-WebSocket-Key: ' + $webSocketKey + $crlf + $crlf
+        $requestBytes = [Text.Encoding]::ASCII.GetBytes($handshake)
+        $ssl.Write($requestBytes, 0, $requestBytes.Length)
+        $ssl.Flush()
 
-    $headerStream = [IO.MemoryStream]::new()
-    $headerBuffer = [byte[]]::new(4096)
-    $responseHeaders = ''
-    $headerEnd = -1
-    while ($headerStream.Length -lt 16384) {
-        $bytesRead = $ssl.Read($headerBuffer, 0, $headerBuffer.Length)
-        if ($bytesRead -le 0) {
-            throw '语音服务在 WebSocket 握手时断开连接。'
+        $headerStream = [IO.MemoryStream]::new()
+        $headerBuffer = [byte[]]::new(4096)
+        $responseHeaders = ''
+        $headerEnd = -1
+        while ($headerStream.Length -lt 16384) {
+            $bytesRead = $ssl.Read($headerBuffer, 0, $headerBuffer.Length)
+            if ($bytesRead -le 0) {
+                throw '语音服务在 WebSocket 握手时断开连接。'
+            }
+            $headerStream.Write($headerBuffer, 0, $bytesRead)
+            $allBytes = $headerStream.ToArray()
+            $responseText = [Text.Encoding]::ASCII.GetString($allBytes)
+            $headerEnd = $responseText.IndexOf($crlf + $crlf)
+            if ($headerEnd -ge 0) {
+                $headerEnd += 4
+                $responseHeaders = $responseText.Substring(0, $headerEnd)
+                break
+            }
         }
-        $headerStream.Write($headerBuffer, 0, $bytesRead)
-        $allBytes = $headerStream.ToArray()
-        $responseText = [Text.Encoding]::ASCII.GetString($allBytes)
-        $headerEnd = $responseText.IndexOf($crlf + $crlf)
-        if ($headerEnd -ge 0) {
-            $headerEnd += 4
-            $responseHeaders = $responseText.Substring(0, $headerEnd)
-            break
+        if ($headerEnd -lt 0) {
+            throw 'WebSocket 握手响应头过大。'
         }
-    }
-    $headerStream.Dispose()
 
-    if ($headerEnd -lt 0) {
-        throw 'WebSocket 握手响应头过大。'
-    }
+        if (-not $responseHeaders.StartsWith('HTTP/1.1 101')) {
+            if ($responseHeaders -match '^HTTP/1\.1 403\s') {
+                # The existing bounded chunk retry will regenerate the token with server time.
+                Update-EdgeSpeechClock $responseHeaders
+            }
+            throw 'WebSocket 握手失败：' + $responseHeaders.Split($crlf)[0]
+        }
 
-    if (-not $responseHeaders.StartsWith('HTTP/1.1 101')) {
-        throw 'WebSocket 握手失败：' + $responseHeaders.Split($crlf)[0]
-    }
+        $acceptSource = [Text.Encoding]::ASCII.GetBytes(
+            $webSocketKey + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
+        $sha1 = [Security.Cryptography.SHA1]::Create()
+        try { $expectedAccept = [Convert]::ToBase64String($sha1.ComputeHash($acceptSource)) }
+        finally { $sha1.Dispose() }
+        if ($responseHeaders -notmatch
+            ('(?im)^Sec-WebSocket-Accept:\s*' + [Regex]::Escape($expectedAccept) + '\s*$')) {
+            throw '语音服务返回了无效的 WebSocket 握手。'
+        }
 
-    $acceptSource = [Text.Encoding]::ASCII.GetBytes(
-        $webSocketKey + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
-    $sha1 = [Security.Cryptography.SHA1]::Create()
-    try { $expectedAccept = [Convert]::ToBase64String($sha1.ComputeHash($acceptSource)) }
-    finally { $sha1.Dispose() }
-    if ($responseHeaders -notmatch
-        ('(?im)^Sec-WebSocket-Accept:\s*' + [Regex]::Escape($expectedAccept) + '\s*$')) {
-        throw '语音服务返回了无效的 WebSocket 握手。'
-    }
-
-    $internalBuffer = [byte[]]::new(65536)
-    $webSocketStream = [PrefixStream]::new(
-        $ssl,
-        $allBytes,
-        $headerEnd,
-        $allBytes.Length - $headerEnd)
-    $createMethod = [Net.WebSockets.WebSocket].GetMethod('CreateClientWebSocket')
-    $socket = $createMethod.Invoke(
-        $null,
-        [object[]]@(
-            $webSocketStream,
+        $internalBuffer = [byte[]]::new(65536)
+        $webSocketStream = [PrefixStream]::new(
+            $ssl,
+            $allBytes,
+            $headerEnd,
+            $allBytes.Length - $headerEnd)
+        $createMethod = [Net.WebSockets.WebSocket].GetMethod('CreateClientWebSocket')
+        $socket = $createMethod.Invoke(
             $null,
-            16384,
-            16384,
-            [TimeSpan]::FromSeconds(20),
-            $false,
-            [ArraySegment[byte]]::new($internalBuffer)))
-    return [PSCustomObject]@{
-        Socket = $socket
-        Stream = $webSocketStream
-        Tcp = $tcp
+            [object[]]@(
+                $webSocketStream,
+                $null,
+                16384,
+                16384,
+                [TimeSpan]::FromSeconds(20),
+                $false,
+                [ArraySegment[byte]]::new($internalBuffer)))
+        # WebSocket receive uses asynchronous reads after the HTTP handshake.
+        $ssl.ReadTimeout = -1
+        $ssl.WriteTimeout = -1
+        return [PSCustomObject]@{
+            Socket = $socket
+            Stream = $webSocketStream
+            Tcp = $tcp
+        }
+    }
+    catch {
+        if ($null -ne $ssl) { $ssl.Dispose() }
+        $tcp.Dispose()
+        throw
+    }
+    finally {
+        if ($null -ne $headerStream) { $headerStream.Dispose() }
     }
 }
 
@@ -4237,7 +4256,7 @@ function Open-EdgeSpeechConnection {
     $uri = 'wss://speech.platform.bing.com/consumer/speech/synthesize/' +
         'readaloud/edge/v1?TrustedClientToken=' + $trustedToken +
         '&ConnectionId=' + $connectionId + '&Sec-MS-GEC=' + $gec +
-        '&Sec-MS-GEC-Version=1-' + $edgeVersion
+        '&Sec-MS-GEC-Version=2-' + $edgeVersion
     $script:edgeConnection = Open-EdgeWebSocket $uri
     $crlf = [char]13 + [char]10
     $config = 'X-Timestamp:' + (Get-EdgeTimestamp) + $crlf +
@@ -4448,6 +4467,7 @@ finally {
 }
 )'
 
+    script := StrReplace(script, "__TOKEN_HELPER__", BuildEdgeSpeechTokenCSharp())
     script := StrReplace(script, "__REQUEST__", Base64EncodeUtf8(requestPath))
     script := StrReplace(script, "__READY__", Base64EncodeUtf8(readyPath))
     return StrReplace(script, "__PARENT_PROCESS_ID__", parentProcessId)

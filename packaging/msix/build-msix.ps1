@@ -138,6 +138,13 @@ if ($compilerProcess.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $compiledPa
 Copy-Item -LiteralPath $iconPath -Destination (Join-Path $layoutPath 'YiDu.ico') -Force
 Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination (Join-Path $layoutPath 'LICENSE.txt') -Force
 
+# Include the corresponding application and LGPL helper sources for modification/recompilation.
+$sourceLayout = Join-Path $layoutPath 'source'
+New-Item -ItemType Directory -Force -Path $sourceLayout | Out-Null
+foreach ($sourceFile in @('YiDu.ahk', 'YiDu.ico', 'README.md', 'LICENSE', 'speech', 'third-party')) {
+    Copy-Item -LiteralPath (Join-Path $root $sourceFile) -Destination $sourceLayout -Recurse -Force
+}
+
 $startupHelperPath = Join-Path $layoutPath 'tools\YiDuStartupTask.exe'
 & (Join-Path $PSScriptRoot 'build-startup-helper.ps1') -OutputPath $startupHelperPath
 if ($LASTEXITCODE -ne 0) {

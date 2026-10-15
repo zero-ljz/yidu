@@ -64,6 +64,7 @@ try {
     $tests = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'speech-tests.ahk'))
     $testPath = Join-Path $testDirectory 'speech-tests.ahk'
     [IO.File]::WriteAllText($testPath, "#Requires AutoHotkey v2.0`n#Warn All, StdOut`n" +
+        '#Include ' + (Join-Path $PSScriptRoot '..\speech\EdgeSpeechToken.ahk') + "`n" +
         $settings + $menuGlobals + $globals + $tests + $speech + $worker + $tray +
         $configFunctions + $voiceFunctions + $format + $autostartAction + $adminAction +
         $resultPositionAction + $startup + $inputFunctions +
@@ -82,6 +83,10 @@ try {
         (Join-Path $testDirectory 'worker.ps1'), [ref]$tokens, [ref]$parseErrors)
     if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
     Write-Output 'PASS: embedded PowerShell worker syntax'
+
+    & powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File (
+        Join-Path $PSScriptRoot 'speech-protocol-tests.ps1') -WorkerPath (Join-Path $testDirectory 'worker.ps1')
+    if ($LASTEXITCODE -ne 0) { throw 'Speech protocol tests failed.' }
 
     if ($Online) {
         $smokePath = Join-Path $PSScriptRoot 'speech-smoke.ps1'

@@ -87,7 +87,7 @@ MSIX 清单声明 `runFullTrust`，用于全局快捷键、选区读取、剪贴
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\run-speech-tests.ps1
 ```
 
-添加 `-Online` 可验证真实语音合成和 Windows 播放接口；该检查仅提交固定测试文本，并静音播放。
+默认测试包含语音鉴权 v2 的固定向量、五分钟时间窗口与服务端时钟校正。添加 `-Online` 可验证真实语音合成和 Windows 播放接口；该检查仅提交固定测试文本，并静音播放。
 
 ## 使用方法
 
@@ -180,4 +180,6 @@ OnlineServicesConsent=0
 
 ## 许可证
 
-本项目使用 [MIT License](LICENSE)。
+译读主体使用 [MIT License](LICENSE)。语音鉴权模块 [speech/EdgeSpeechToken.ahk](speech/EdgeSpeechToken.ahk) 改编自 [edge-tts](https://github.com/rany2/edge-tts)，使用 LGPL-3.0-only；许可原文见 [第三方许可](third-party/edge-tts-LICENSE.txt) 和 [GPLv3](third-party/GPL-3.0.txt)。
+
+MSIX 包内的 `source` 目录包含主程序、鉴权模块源码与许可文本，可按“从源码运行”中的说明修改并重新编译主程序。
