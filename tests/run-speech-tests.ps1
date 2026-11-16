@@ -1,7 +1,8 @@
 param(
     [string]$AutoHotkeyPath = (Join-Path $env:ProgramFiles 'AutoHotkey\v2\AutoHotkey64.exe'),
     [switch]$Online,
-    [switch]$TextButtons
+    [switch]$TextButtons,
+    [switch]$TranslationOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -46,6 +47,12 @@ try {
     $speakText = Get-SourceBlock "`nSpeakText(readSelection)`n" "`nGetSelectedText()`n"
     $speakText = $speakText.Replace('TrayTip(', 'TestTrayTip(')
     $translationStart = Get-SourceBlock "`nStartTranslationRequest(" "`nStartNextTranslationChunk("
+    $translationLanguages = Get-SourceBlock "`nGetTranslationTargetLanguage(" "`nStartTranslationRequest("
+    $translationRequests = Get-SourceBlock "`nBuildTranslationRequest(" "`nParseTranslationResponse("
+    $urlEncoding = Get-SourceBlock "`nUrlEncode(" "`nShowTranslationResult("
+    $resultDisplay = Get-SourceBlock "`nShowTranslationResult(" "`nPositionResultWindowAtMouse("
+    $resultDisplay = $resultDisplay.Replace('ShowTranslationResult(translatedText, pending := false)',
+        'RenderTranslationResult(translatedText, pending := false)')
     $translationEvents = Get-SourceBlock "`nRetryCurrentTranslationChunk()`n" "`nBuildTranslationRequest("
     $hideResult = Get-SourceBlock "`nHideResultWindow(*)`n" "`nCopyCurrentTranslation(*)`n"
     $resultCreate = Get-SourceBlock "`nCreateResultWindow()`n" "`nHideResultWindow(*)`n"
@@ -56,6 +63,8 @@ try {
     $resultResize = Get-SourceBlock "`nResizeResultWindow(" "`nclass JsonParser`n"
     $windowRect = Get-SourceBlock "`nGetPhysicalWindowRect(" "`nMoveWindowPhysical("
     $appearance = Get-SourceBlock "`nGetAppearancePalette()`n" "`nApplyAppearanceToOpenWindows()`n"
+    $appearanceUpdate = Get-SourceBlock "`nApplyAppearanceToOpenWindows()`n" "`nSetPreferredAppColorMode("
+    $appearanceUpdate = $appearanceUpdate.Replace('ApplyAppearanceToOpenWindows()', 'RenderAppearanceToOpenWindows()')
     $dropDownTheme = Get-SourceBlock "`nSetPreferredAppColorMode(" "`nRedrawGuiWindow("
     $redraw = Get-SourceBlock "`nRedrawGuiWindow(" "`nResizeResultWindow("
     $settingsModule = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '..\settings\Settings.ahk')).Replace("`r`n", "`n")
@@ -65,15 +74,16 @@ try {
     $tests = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'speech-tests.ahk'))
     $testPath = Join-Path $testDirectory 'speech-tests.ahk'
     [IO.File]::WriteAllText($testPath, "#Requires AutoHotkey v2.0`n#Warn All, StdOut`n" +
+        ('global TestTranslationOnly := ' + $TranslationOnly.IsPresent.ToString().ToLowerInvariant()) + "`n" +
         '#Include ' + (Join-Path $PSScriptRoot '..\speech\EdgeSpeechToken.ahk') + "`n" +
         '#Include ' + (Join-Path $PSScriptRoot '..\settings\Hotkeys.ahk') + "`n" +
         $settingsModule + "`n" +
         $settings + $menuGlobals + $globals + $tests + $speech + $worker + $tray +
         $configFunctions + $voiceFunctions + $format + $autostartAction +
         $resultPositionAction + $privacyActions + $startup + $inputFunctions +
-        $inputEvents + $speakText + $translationStart + $translationEvents + $hideResult +
-        $resultCreate + $resultCommands + $resultResize +
-        $windowRect + $appearance + $dropDownTheme + $redraw, [Text.UTF8Encoding]::new($true))
+        $inputEvents + $speakText + $translationLanguages + $translationRequests + $urlEncoding + $translationStart + $translationEvents + $hideResult +
+        $resultCreate + $resultDisplay + $resultCommands + $resultResize +
+        $windowRect + $appearance + $appearanceUpdate + $dropDownTheme + $redraw, [Text.UTF8Encoding]::new($true))
 
     & $AutoHotkeyPath /ErrorStdOut /iLib (Join-Path $testDirectory 'includes.txt') (Join-Path $PSScriptRoot '..\YiDu.ahk') | Write-Output
     if ($LASTEXITCODE -ne 0) { throw 'AutoHotkey source validation failed.' }

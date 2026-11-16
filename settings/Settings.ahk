@@ -375,7 +375,7 @@ SaveSettings(dialog, *)
 
 SaveSettingsDraft(dialog)
 {
-    global CONFIG, TRANSLATION_SERVICES, SPEECH_VOICES, SPEECH_SPEEDS, ActiveInputDialog
+    global CONFIG, TRANSLATION_SERVICES, SPEECH_VOICES, SPEECH_SPEEDS, ActiveInputDialog, ResultView
     global PrivacyGui
     StopHotkeyRecording(dialog)
     settings := Map(
@@ -429,6 +429,8 @@ SaveSettingsDraft(dialog)
         CONFIG.%key% := value
     ApplyResultPositionSetting(CONFIG.ShowResultAtMouse)
     UpdateSpeechSpeedControls()
+    if IsObject(ResultView)
+        ResultView.ServiceList.Choose(GetTranslationServiceIndex(CONFIG.TranslationService))
     if IsObject(ActiveInputDialog) && IsObject(ActiveInputDialog.SelectorList)
     {
         if ActiveInputDialog.State.DraftKey = "voice"

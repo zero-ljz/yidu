@@ -7,12 +7,12 @@
 ;@Ahk2Exe-SetCompanyName zero-ljz（空心）
 ;@Ahk2Exe-SetDescription 译读
 ;@Ahk2Exe-SetCopyright Copyright (c) 2026 zero-ljz
-;@Ahk2Exe-SetVersion 1.4.0.0
+;@Ahk2Exe-SetVersion 1.5.0.0
 
 SendMode "Input"
 CoordMode "Mouse", "Screen"
 
-global APP_VERSION := "1.4.0"
+global APP_VERSION := "1.5.0"
 global CONFIG := {
     Hotkey: "^F1",
     SpeakHotkey: "^F2",
@@ -67,6 +67,17 @@ global TRANSLATION_SERVICES := [
     {Label: "谷歌", Service: "google"}
 ]
 
+global TRANSLATION_LANGUAGES := [
+    {Label: "中文", Code: "zh", Youdao: "zh-CHS"},
+    {Label: "英语", Code: "en", Youdao: "en"},
+    {Label: "日语", Code: "ja", Youdao: "ja"},
+    {Label: "韩语", Code: "ko", Youdao: "ko"},
+    {Label: "法语", Code: "fr", Youdao: "fr"},
+    {Label: "德语", Code: "de", Youdao: "de"},
+    {Label: "西班牙语", Code: "es", Youdao: "es"},
+    {Label: "俄语", Code: "ru", Youdao: "ru"}
+]
+
 global IS_PACKAGED := IsPackagedApplication()
 global CONFIG_DIRECTORY := IS_PACKAGED ? A_AppData . "\YiDu" : A_ScriptDir
 global CONFIG_PATH := CONFIG_DIRECTORY . "\YiDu.ini"
@@ -75,6 +86,7 @@ global PACKAGED_STARTUP_HELPER := A_ScriptDir . "\tools\YiDuStartupTask.exe"
 
 global TranslationBusy := false
 global ResultGui := 0
+global ResultView := 0
 global ResultEdit := 0
 global ResultPinButton := 0
 global ResultSpeakButton := 0
@@ -1279,7 +1291,7 @@ TranslateFromTray(*)
 
 TranslateText(readSelection)
 {
-    global ActiveInputDialog, TranslationBusy
+    global ActiveInputDialog
 
     if IsObject(ActiveInputDialog)
     {
@@ -1287,35 +1299,17 @@ TranslateText(readSelection)
         return
     }
 
-    if TranslationBusy
-        return
-
     if !EnsureOnlineServicesConsent()
         return
-
-    TranslationBusy := true
 
     try
     {
         sourceText := readSelection ? GetSelectedText() : ""
-
-        if sourceText = ""
-        {
-            sourceText := PromptForText("输入翻译内容", "翻译", "translation")
-
-            if sourceText = ""
-            {
-                TranslationBusy := false
-                return
-            }
-        }
-
-        targetLanguage := GetTranslationTargetLanguage(sourceText)
-        StartTranslationRequest(sourceText, targetLanguage)
+        OpenTranslationWindow(sourceText)
     }
     catch Error as err
     {
-        TranslationBusy := false
+        CancelTranslationRequest()
         ShowTranslationError(err.Message)
     }
 }
@@ -1352,7 +1346,7 @@ SpeakText(readSelection)
 
         if sourceText = ""
         {
-            PromptForText("输入朗读内容", "朗读", "voice")
+            PromptForText("译读 · 朗读", "朗读", "voice")
             return
         }
 
@@ -1593,7 +1587,8 @@ HasInputIconFont(fontName := "Segoe MDL2 Assets")
         if StrGet(face, "UTF-16") != fontName
             return false
         glyphs := Chr(0xE718) . Chr(0xE77A) . Chr(0xE768) . Chr(0xE769) . Chr(0xE71A) . Chr(0xE711)
-            . Chr(0xE8C8) . Chr(0xE73E) . Chr(0xE995)
+            . Chr(0xE8C8) . Chr(0xE73E) . Chr(0xE995) . Chr(0xE77F)
+            . Chr(0xE74D) . Chr(0xE72C) . Chr(0xE70E) . Chr(0xE70D) . Chr(0xE8AB)
         indices := Buffer(StrLen(glyphs) * 2, 0)
         if DllCall("gdi32\GetGlyphIndicesW", "Ptr", dc, "Str", glyphs,
             "Int", StrLen(glyphs), "Ptr", indices.Ptr, "UInt", 1, "UInt") = 0xFFFFFFFF
@@ -1719,11 +1714,11 @@ DrawIconButton(lParam)
         }
         dpi := 96
         try dpi := DllCall("user32\GetDpiForWindow", "Ptr", controlHwnd, "UInt")
-        font := CreateInputIconFont(dpi)
-        DllCall("gdi32\SelectObject", "Ptr", dc, "Ptr", font)
         DllCall("gdi32\SetBkMode", "Ptr", dc, "Int", 1)
         DllCall("gdi32\SetTextColor", "Ptr", dc, "UInt",
             RgbToColorRef(disabled ? palette.MutedText : palette.Text))
+        font := CreateInputIconFont(dpi)
+        DllCall("gdi32\SelectObject", "Ptr", dc, "Ptr", font)
         DllCall("user32\DrawTextW", "Ptr", dc, "Str", Chr(button.Glyph),
             "Int", -1, "Ptr", rect.Ptr, "UInt", 0x825, "Int")
         if itemState & 0x10 && !(itemState & 0x200)
@@ -1953,7 +1948,16 @@ CloseTextInput(inputGui, preserveDraft := false)
 
 HandleInputKeyDown(wParam, lParam, message, hwnd)
 {
-    global ActiveInputDialog
+    global ActiveInputDialog, ResultView
+
+    if IsObject(ResultView) && hwnd = ResultView.SourceEdit.Hwnd && wParam = 0x0D
+    {
+        if GetKeyState("Shift")
+            SendMessage(0x00C2, true, StrPtr("`r`n"), , "ahk_id " . hwnd)
+        else
+            RetranslateFromWindow()
+        return 0
+    }
 
     if !IsObject(ActiveInputDialog)
         return
@@ -2329,20 +2333,23 @@ GetTranslationTargetLanguage(text)
 }
 
 
-StartTranslationRequest(sourceText, targetLanguage)
+StartTranslationRequest(sourceText, targetLanguage, sourceLanguage := "auto", service := "")
 {
-    global CONFIG, ActiveTranslationRequest
+    global CONFIG, ActiveTranslationRequest, TranslationBusy
 
     Critical
 
+    CancelTranslationRequest()
     StopSpeech()
     chunks := SplitTranslationText(sourceText)
+    TranslationBusy := true
     ActiveTranslationRequest := {
         Chunks: chunks,
         ChunkIndex: 0,
         Results: [],
         TargetLanguage: targetLanguage,
-        Service: CONFIG.TranslationService,
+        SourceLanguage: sourceLanguage,
+        Service: service = "" ? CONFIG.TranslationService : service,
         Http: 0,
         StartedAt: 0,
         Attempt: 0,
@@ -2354,6 +2361,7 @@ StartTranslationRequest(sourceText, targetLanguage)
             : "翻译中...",
         true
     )
+    UpdateTranslationButton(true)
 
     try StartNextTranslationChunk()
     catch Error
@@ -2387,7 +2395,8 @@ StartNextTranslationChunk(retryCurrent := false)
         sourceText,
         requestState.TargetLanguage,
         requestState.ChunkIndex,
-        requestState.Attempt
+        requestState.Attempt,
+        requestState.SourceLanguage
     )
 
     request := requestOptions.Transport = "xmlhttp"
@@ -2574,6 +2583,7 @@ CancelTranslationRequest()
         requestState := ActiveTranslationRequest
         ActiveTranslationRequest := 0
         TranslationBusy := false
+        UpdateTranslationButton(false)
         if IsObject(requestState)
             try requestState.Http.Abort()
     }
@@ -2588,29 +2598,41 @@ FinishTranslationRequest()
     SetTimer(CheckTranslationRequest, 0)
     ActiveTranslationRequest := 0
     TranslationBusy := false
+    UpdateTranslationButton(false)
 }
 
 
-BuildTranslationRequest(service, sourceText, targetLanguage, chunkIndex, attempt)
+BuildTranslationRequest(service, sourceText, targetLanguage, chunkIndex, attempt, sourceLanguage := "auto")
 {
-    global CONFIG
+    global CONFIG, TRANSLATION_LANGUAGES
 
     if service = "youdao"
     {
+        youdaoSource := "Auto"
+        youdaoTarget := targetLanguage
+        for language in TRANSLATION_LANGUAGES
+        {
+            if language.Code = sourceLanguage
+                youdaoSource := language.Youdao
+            if language.Code = targetLanguage
+                youdaoTarget := language.Youdao
+        }
         return {
             Method: "POST",
             Url: "https://aidemo.youdao.com/trans",
             Transport: "winhttp",
             ContentType: "application/x-www-form-urlencoded; charset=UTF-8",
             Referer: "https://ai.youdao.com/",
-            Body: "q=" . UrlEncode(sourceText) . "&from=Auto&to=Auto"
+            Body: "q=" . UrlEncode(sourceText) . "&from=" . UrlEncode(youdaoSource)
+                . "&to=" . UrlEncode(youdaoTarget)
         }
     }
 
     if service = "google"
     {
         googleTarget := targetLanguage = "zh" ? "zh-CN" : targetLanguage
-        params := "client=dict-chrome-ex&sl=auto&tl="
+        googleSource := sourceLanguage = "zh" ? "zh-CN" : sourceLanguage
+        params := "client=dict-chrome-ex&sl=" . UrlEncode(googleSource) . "&tl="
             . UrlEncode(googleTarget) . "&q=" . UrlEncode(sourceText)
 
         return {
@@ -2623,7 +2645,7 @@ BuildTranslationRequest(service, sourceText, targetLanguage, chunkIndex, attempt
         }
     }
 
-    params := "source=auto"
+    params := "source=" . UrlEncode(sourceLanguage)
         . "&target=" . UrlEncode(targetLanguage)
         . "&sourceText=" . UrlEncode(sourceText)
         . "&platform=WeChat_APP"
@@ -2909,23 +2931,15 @@ ShowTranslationResult(translatedText, pending := false)
         CreateResultWindow()
 
     ResultEdit.Value := translatedText
-    ResultEdit.Opt(pending ? "+ReadOnly" : "-ReadOnly")
+    ResultEdit.Opt("+ReadOnly")
     ResultSpeakButton.Enabled := !pending
     ResultCopyButton.Enabled := !pending
     UpdateSpeechControls()
+    FitTranslationWindow()
 
     if isNewWindow
     {
-        ApplyWindowTheme(
-            ResultGui,
-            ResultEdit,
-            ResultPinButton,
-            ResultSpeakButton,
-            ResultPauseButton,
-            ResultCopyButton,
-            ResultCloseButton
-        )
-        ResultGui.Show("w400 h200")
+        ResultGui.Show()
         ApplyWindowTransparency(ResultGui)
     }
     else
@@ -2939,10 +2953,11 @@ ShowTranslationResult(translatedText, pending := false)
         ResultGui.Show()
     }
 
-    if ShowResultAtMouse && (pending || isNewWindow || !wasVisible)
+    if ShowResultAtMouse && !wasVisible
         PositionResultWindowAtMouse()
 
-    WinActivate("ahk_id " . ResultGui.Hwnd)
+    if !wasVisible
+        WinActivate("ahk_id " . ResultGui.Hwnd)
     RedrawGuiWindow(ResultGui)
 }
 
@@ -3093,20 +3108,60 @@ CreateResultWindow()
 {
     global ResultGui, ResultEdit, ResultPinButton, ResultSpeakButton
     global ResultPauseButton, ResultCopyButton, ResultCloseButton
-    global ResultIconButtons, ResultPinned
+    global ResultIconButtons, ResultPinned, ResultView
+    global CONFIG, TRANSLATION_LANGUAGES, TRANSLATION_SERVICES
 
     palette := GetAppearancePalette()
     ResultGui := Gui(
-        "+Resize +MinSize400x128",
-        "翻译结果"
+        "+Resize +MinSize520x290",
+        "译读 · 翻译"
     )
     ResultGui.MarginX := 10
     ResultGui.MarginY := 10
     ResultGui.BackColor := palette.WindowBackground
     ResultGui.SetFont("s10 c" . palette.Text, "Microsoft YaHei UI")
 
+    sourceLabels := ["自动检测"]
+    targetLabels := ["自动中英互译"]
+    for language in TRANSLATION_LANGUAGES
+    {
+        sourceLabels.Push(language.Label)
+        targetLabels.Push(language.Label)
+    }
+    serviceLabels := []
+    for item in TRANSLATION_SERVICES
+        serviceLabels.Push(item.Label)
+
+    ResultView := {
+        Expanded: true,
+        AutoSizing: false,
+        LastWidth: 0,
+        LastMinMax: 0,
+        SourceMinHeight: 64,
+        SourceMaxHeight: 220,
+        ResultMinHeight: 64,
+        ResultMaxHeight: 360,
+        SourceList: ResultGui.AddDropDownList("x10 y10 w100 +0x210", sourceLabels),
+        SwapButton: ResultGui.AddButton("x122 y10 w28 h26", "交换语言"),
+        TargetList: ResultGui.AddDropDownList("x162 y10 w112 +0x210", targetLabels),
+        ServiceLabel: ResultGui.AddText("x414 y10 h26 +0x200", "翻译服务"),
+        ServiceList: ResultGui.AddDropDownList("x486 y10 w64 +0x210", serviceLabels),
+        SourceHeading: ResultGui.AddText("x10 y46 w40 h26 +0x200", "原文"),
+        ToggleButton: ResultGui.AddButton("x58 y46 w72 h26", "收起原文"),
+        PasteButton: ResultGui.AddButton("x302 y46 w72 h26", "粘贴"),
+        ClearButton: ResultGui.AddButton("x382 y46 w72 h26", "清空"),
+        TranslateButton: ResultGui.AddButton("x462 y46 w88 h26 Default", "翻译"),
+        SourceEdit: ResultGui.AddEdit("x10 y82 w540 h64 +Multi +WantReturn Background"
+            . palette.FieldBackground . " c" . palette.Text),
+        ResultLabel: ResultGui.AddText("x10 y154 w200 h22 +0x200", "译文")
+    }
+    ResultView.SourceList.Choose(1)
+    ResultView.TargetList.Choose(1)
+    ResultView.SourceTooltip := CreateControlTooltip(ResultGui, ResultView.SourceList, "源语言")
+    ResultView.TargetTooltip := CreateControlTooltip(ResultGui, ResultView.TargetList, "目标语言")
+    ResultView.ServiceList.Choose(GetTranslationServiceIndex(CONFIG.TranslationService))
     ResultEdit := ResultGui.AddEdit(
-        "xm ym w380 h144 +Multi +WantReturn Background"
+        "x10 y180 w540 h64 +Multi +WantReturn +ReadOnly Background"
             . palette.FieldBackground . " c" . palette.Text
     )
     useIcons := HasInputIconFont()
@@ -3114,15 +3169,31 @@ CreateResultWindow()
     ResultPinButton := ResultGui.AddButton("xm y+10 w" . (useIcons ? 28 : 72) . " h26", "钉住")
     ResultPauseButton := ResultGui.AddButton("x" . (useIcons ? 262 : 114) . " yp w" . (useIcons ? 28 : 64) . " h26", "暂停")
     ResultSpeakButton := ResultGui.AddButton("x+8 yp w" . (useIcons ? 28 : 64) . " h26", "朗读")
-    ResultCopyButton := ResultGui.AddButton("x+8 yp w" . (useIcons ? 28 : 72) . " h26 Default", "复制结果")
+    ResultCopyButton := ResultGui.AddButton("x+8 yp w" . (useIcons ? 28 : 72) . " h26", "复制结果")
     ResultCloseButton := ResultGui.AddButton("x+8 yp w" . (useIcons ? 28 : 52) . " h26", "关闭")
+    ResultSpeakButton.Enabled := false
+    ResultCopyButton.Enabled := false
+    ResultView.SourceEdit.OnEvent("Change", QueueTranslationWindowFit)
+    ResultEdit.OnEvent("Change", QueueTranslationWindowFit)
     if useIcons
     {
+        InitializeIconButton(ResultGui, ResultIconButtons, ResultView.SwapButton, 0xE8AB)
+        for control in [ResultView.ToggleButton, ResultView.PasteButton, ResultView.ClearButton, ResultView.TranslateButton]
+            control.Move(, , 28)
+        InitializeIconButton(ResultGui, ResultIconButtons, ResultView.ToggleButton, 0xE70E)
+        InitializeIconButton(ResultGui, ResultIconButtons, ResultView.PasteButton, 0xE77F)
+        InitializeIconButton(ResultGui, ResultIconButtons, ResultView.ClearButton, 0xE74D)
+        InitializeIconButton(ResultGui, ResultIconButtons, ResultView.TranslateButton, 0xE72C)
         InitializeIconButton(ResultGui, ResultIconButtons, ResultPinButton, 0xE718)
         InitializeIconButton(ResultGui, ResultIconButtons, ResultPauseButton, 0xE769)
         InitializeIconButton(ResultGui, ResultIconButtons, ResultSpeakButton, 0xE995)
         InitializeIconButton(ResultGui, ResultIconButtons, ResultCopyButton, 0xE8C8)
         InitializeIconButton(ResultGui, ResultIconButtons, ResultCloseButton, 0xE711)
+    }
+    else
+    {
+        ResultView.SwapButton.Text := "⇄"
+        ResultView.SwapTooltip := CreateControlTooltip(ResultGui, ResultView.SwapButton, "交换语言")
     }
     if ResultPinned
     {
@@ -3132,6 +3203,13 @@ CreateResultWindow()
     }
 
     ResultPinButton.OnEvent("Click", ToggleResultPinned)
+    ResultView.ToggleButton.OnEvent("Click", ToggleTranslationSource)
+    ResultView.PasteButton.OnEvent("Click", PasteTranslationSource)
+    ResultView.ClearButton.OnEvent("Click", ClearTranslationSource)
+    ResultView.TranslateButton.OnEvent("Click", HandleTranslationButton)
+    ResultView.SwapButton.OnEvent("Click", SwapTranslationLanguages)
+    for selector in [ResultView.SourceList, ResultView.TargetList, ResultView.ServiceList]
+        selector.OnEvent("Change", ChangeTranslationOptions)
     ResultSpeakButton.OnEvent("Click", SpeakCurrentTranslation)
     ResultPauseButton.OnEvent("Click", ToggleSpeechPause)
     ResultCopyButton.OnEvent("Click", CopyCurrentTranslation)
@@ -3149,15 +3227,343 @@ CreateResultWindow()
             ResultCloseButton
         )
     )
+    ApplyAppearanceToExistingWindow(ResultGui)
+    ThemeTranslationSelectors()
     UpdateSpeechControls()
+}
+
+
+SwapTranslationLanguages(*)
+{
+    global ResultView, TRANSLATION_LANGUAGES
+    sourceIndex := ResultView.SourceList.Value
+    targetIndex := ResultView.TargetList.Value
+    if sourceIndex = 1
+    {
+        text := Trim(ResultView.SourceEdit.Value)
+        if text = ""
+            return
+        ; Resolve automatic detection to the current Chinese/English direction.
+        sourceCode := GetTranslationTargetLanguage(text) = "zh" ? "en" : "zh"
+        for index, language in TRANSLATION_LANGUAGES
+            if language.Code = sourceCode
+                sourceIndex := index + 1
+    }
+    if targetIndex = 1
+        targetIndex := sourceIndex = 2 ? 3 : 2
+    ResultView.SourceList.Choose(targetIndex)
+    ResultView.TargetList.Choose(sourceIndex)
+    if Trim(ResultView.SourceEdit.Value) != ""
+        RetranslateFromWindow()
+}
+
+
+OpenTranslationWindow(sourceText := "")
+{
+    global ResultGui, ResultView, ResultEdit, CONFIG, ShowResultAtMouse
+
+    isNewWindow := !IsObject(ResultGui)
+    if isNewWindow
+        CreateResultWindow()
+
+    if sourceText != ""
+    {
+        CancelTranslationRequest()
+        ResultView.SourceEdit.Value := sourceText
+        ResultEdit.Value := ""
+        SetTranslationSourceExpanded(false)
+    }
+    else if isNewWindow
+        ResultView.SourceEdit.Value := A_Clipboard
+
+    ResultView.ServiceList.Choose(GetTranslationServiceIndex(CONFIG.TranslationService))
+    wasVisible := DllCall("IsWindowVisible", "Ptr", ResultGui.Hwnd)
+    FitTranslationWindow()
+    if isNewWindow
+        ResultGui.Show()
+    else
+    {
+        if DllCall("user32\IsIconic", "Ptr", ResultGui.Hwnd)
+            WinRestore("ahk_id " . ResultGui.Hwnd)
+        ResultGui.Show()
+    }
+    ApplyWindowTransparency(ResultGui)
+    if !wasVisible && ShowResultAtMouse
+        PositionResultWindowAtMouse()
+    WinActivate("ahk_id " . ResultGui.Hwnd)
+    if ResultView.Expanded
+        ResultView.SourceEdit.Focus()
+    else
+        ResultView.TranslateButton.Focus()
+    if sourceText != ""
+        RetranslateFromWindow()
+}
+
+
+RetranslateFromWindow(*)
+{
+    global ResultView, TRANSLATION_LANGUAGES, TRANSLATION_SERVICES
+
+    if !IsObject(ResultView)
+        return
+    sourceText := Trim(ResultView.SourceEdit.Value)
+    if sourceText = ""
+    {
+        SetTranslationSourceExpanded(true)
+        ResultView.SourceEdit.Focus()
+        return
+    }
+    if !EnsureOnlineServicesConsent()
+        return
+
+    sourceIndex := ResultView.SourceList.Value
+    targetIndex := ResultView.TargetList.Value
+    sourceLanguage := sourceIndex = 1 ? "auto" : TRANSLATION_LANGUAGES[sourceIndex - 1].Code
+    targetLanguage := targetIndex = 1
+        ? (sourceLanguage = "zh" ? "en" : (sourceLanguage != "auto" ? "zh" : GetTranslationTargetLanguage(sourceText)))
+        : TRANSLATION_LANGUAGES[targetIndex - 1].Code
+    service := TRANSLATION_SERVICES[ResultView.ServiceList.Value].Service
+    try StartTranslationRequest(sourceText, targetLanguage, sourceLanguage, service)
+    catch Error as err
+    {
+        CancelTranslationRequest()
+        ShowTranslationError(err.Message)
+    }
+}
+
+
+ChangeTranslationOptions(selector, *)
+{
+    global ResultView, TRANSLATION_SERVICES
+    if selector = ResultView.ServiceList
+        SetTranslationService(TRANSLATION_SERVICES[selector.Value].Service)
+    if Trim(ResultView.SourceEdit.Value) != ""
+        RetranslateFromWindow()
+}
+
+
+ToggleTranslationSource(*)
+{
+    global ResultView
+    SetTranslationSourceExpanded(!ResultView.Expanded)
+}
+
+
+SetTranslationSourceExpanded(expanded)
+{
+    global ResultGui, ResultView, ResultEdit, ResultPinButton, ResultPauseButton
+    global ResultSpeakButton, ResultCopyButton, ResultCloseButton
+    ResultView.Expanded := expanded
+    ResultView.SourceEdit.Visible := expanded
+    ResultView.ToggleButton.Text := expanded ? "收起原文" : "展开原文"
+    UpdateIconButton(ResultView.ToggleButton, expanded ? 0xE70E : 0xE70D)
+    FitTranslationWindow()
+}
+
+
+PasteTranslationSource(*)
+{
+    global ResultView
+    ClearTranslationSource()
+    ResultView.SourceEdit.Value := A_Clipboard
+    SendMessage(0x00B1, 0, -1, , "ahk_id " . ResultView.SourceEdit.Hwnd)
+    FitTranslationWindow()
+}
+
+
+ClearTranslationSource(*)
+{
+    global ResultView, ResultEdit, ResultSpeakButton, ResultCopyButton
+    CancelTranslationRequest()
+    StopSpeech()
+    ResultView.SourceEdit.Value := ""
+    ResultEdit.Value := ""
+    ResultEdit.Opt("+ReadOnly")
+    ResultSpeakButton.Enabled := false
+    ResultCopyButton.Enabled := false
+    RestoreCopyButtonFeedback()
+    SetTranslationSourceExpanded(true)
+    ResultView.SourceEdit.Focus()
+}
+
+
+QueueTranslationWindowFit(*)
+{
+    global ResultGui, ResultView
+    if IsObject(ResultView) && !ResultView.AutoSizing
+        && IsObject(ResultGui) && DllCall("IsWindowVisible", "Ptr", ResultGui.Hwnd)
+    {
+        SetTimer(FitTranslationWindow, -100)
+    }
+}
+
+
+MeasureTranslationEditHeight(edit, width, minimum, maximum)
+{
+    ; Native line counts include wrapping, explicit newlines and long unbroken words.
+    edit.Move(, , width)
+    lineCount := Max(1, SendMessage(0x00BA, , , , "ahk_id " . edit.Hwnd))
+    dpi := DllCall("user32\GetDpiForWindow", "Ptr", edit.Hwnd, "UInt")
+    dc := DllCall("user32\GetDC", "Ptr", edit.Hwnd, "Ptr")
+    if !dc
+        return minimum
+    font := SendMessage(0x0031, , , , "ahk_id " . edit.Hwnd)
+    oldFont := font ? DllCall("gdi32\SelectObject", "Ptr", dc, "Ptr", font, "Ptr") : 0
+    try
+    {
+        metrics := Buffer(60, 0)
+        if !DllCall("gdi32\GetTextMetricsW", "Ptr", dc, "Ptr", metrics.Ptr)
+            return minimum
+        textHeight := Ceil(lineCount * NumGet(metrics, 0, "Int") * 96 / Max(96, dpi)) + 12
+        return Min(maximum, Max(minimum, textHeight))
+    }
+    finally
+    {
+        if oldFont
+            DllCall("gdi32\SelectObject", "Ptr", dc, "Ptr", oldFont)
+        DllCall("user32\ReleaseDC", "Ptr", edit.Hwnd, "Ptr", dc)
+    }
+}
+
+
+GetTranslationPaneHeights(width)
+{
+    global ResultView, ResultEdit
+    return {
+        Source: MeasureTranslationEditHeight(ResultView.SourceEdit, width - 20,
+            ResultView.SourceMinHeight, ResultView.SourceMaxHeight),
+        Result: MeasureTranslationEditHeight(ResultEdit, width - 20,
+            ResultView.ResultMinHeight, ResultView.ResultMaxHeight)
+    }
+}
+
+
+FitTranslationWindow(*)
+{
+    global ResultGui, ResultView, ResultEdit, ResultPinButton, ResultPauseButton
+    global ResultSpeakButton, ResultCopyButton, ResultCloseButton
+    if !IsObject(ResultGui) || !IsObject(ResultView) || ResultView.AutoSizing
+        return
+    SetTimer(FitTranslationWindow, 0)
+    ResultView.AutoSizing := true
+    try
+    {
+        ResultGui.GetClientPos(, , &width, &height)
+        if DllCall("user32\IsZoomed", "Ptr", ResultGui.Hwnd)
+        {
+            ResizeResultWindow(ResultEdit, ResultPinButton, ResultPauseButton, ResultSpeakButton,
+                ResultCopyButton, ResultCloseButton, ResultGui, 1, width, height)
+            return
+        }
+        width := width >= 520 ? width : 560
+        paneHeights := GetTranslationPaneHeights(width)
+        minimum := 154 + ResultView.ResultMinHeight
+            + (ResultView.Expanded ? ResultView.SourceMinHeight + 8 : 0)
+        maximum := 154 + ResultView.ResultMaxHeight
+            + (ResultView.Expanded ? ResultView.SourceMaxHeight + 8 : 0)
+        desired := 154 + paneHeights.Result + (ResultView.Expanded ? paneHeights.Source + 8 : 0)
+
+        ; Limit the entire window to the current monitor's usable height as well.
+        monitor := DllCall("user32\MonitorFromWindow", "Ptr", ResultGui.Hwnd, "UInt", 2, "Ptr")
+        monitorInfo := Buffer(40, 0)
+        NumPut("UInt", 40, monitorInfo)
+        if DllCall("user32\GetMonitorInfoW", "Ptr", monitor, "Ptr", monitorInfo.Ptr)
+        {
+            dpi := DllCall("user32\GetDpiForWindow", "Ptr", ResultGui.Hwnd, "UInt")
+            GetPhysicalWindowRect(ResultGui.Hwnd, , , , &outerHeight)
+            workHeight := NumGet(monitorInfo, 32, "Int") - NumGet(monitorInfo, 24, "Int")
+            frameHeight := Max(0, outerHeight - Round(height * dpi / 96))
+            maximum := Min(maximum, Max(minimum, Floor((workHeight - frameHeight - 20) * 96 / Max(96, dpi))))
+        }
+        desired := Min(maximum, Max(minimum, desired))
+        ResultGui.Opt("+MinSize520x" . minimum)
+        visible := DllCall("IsWindowVisible", "Ptr", ResultGui.Hwnd)
+        if height != desired || ResultView.LastWidth = 0
+        {
+            ResultGui.Show((visible ? "NA " : "Hide ") . "w" . width . " h" . desired)
+        }
+        ResultGui.GetClientPos(, , &width, &height)
+        ResizeResultWindow(ResultEdit, ResultPinButton, ResultPauseButton, ResultSpeakButton,
+            ResultCopyButton, ResultCloseButton, ResultGui, 0, width, height)
+        if visible
+        {
+            GetPhysicalWindowRect(ResultGui.Hwnd, &windowX, &windowY, , &outerHeight)
+            workTop := NumGet(monitorInfo, 24, "Int")
+            workBottom := NumGet(monitorInfo, 32, "Int")
+            if workBottom > workTop
+            {
+                targetY := Min(Max(windowY, workTop), Max(workTop, workBottom - outerHeight))
+                if targetY != windowY
+                    MoveWindowPhysical(ResultGui.Hwnd, windowX, targetY)
+            }
+        }
+    }
+    finally ResultView.AutoSizing := false
+}
+
+
+UpdateTranslationButton(busy)
+{
+    global ResultView
+    if !IsObject(ResultView)
+        return
+    control := ResultView.TranslateButton
+    control.Enabled := true
+    control.Text := busy ? "取消翻译" : "翻译"
+    UpdateIconButton(control, busy ? 0xE71A : 0xE72C)
+}
+
+
+HandleTranslationButton(*)
+{
+    global TranslationBusy, ResultEdit, ResultSpeakButton, ResultCopyButton
+    previousCritical := A_IsCritical
+    Critical
+    try
+    {
+        if !TranslationBusy
+        {
+            RetranslateFromWindow()
+            return
+        }
+        CancelTranslationRequest()
+        ResultEdit.Value := "翻译已取消，点击“翻译”重试。"
+        ResultSpeakButton.Enabled := false
+        ResultCopyButton.Enabled := false
+        FitTranslationWindow()
+    }
+    finally Critical(previousCritical)
+}
+
+
+ThemeTranslationSelectors()
+{
+    global ResultView
+    if !IsObject(ResultView)
+        return
+    for selector in [ResultView.SourceList, ResultView.TargetList, ResultView.ServiceList]
+    {
+        ApplyDropDownTheme(selector)
+        MatchDropDownHeight(ResultView.TranslateButton, selector)
+        CenterControlVertically(ResultView.SwapButton, selector)
+    }
 }
 
 
 HideResultWindow(*)
 {
-    global ResultGui
+    global ResultGui, ResultEdit, ResultSpeakButton, ResultCopyButton, TranslationBusy
 
+    wasPending := TranslationBusy
+    SetTimer(FitTranslationWindow, 0)
     CancelTranslationRequest()
+    if wasPending && IsObject(ResultEdit)
+    {
+        ResultEdit.Value := "翻译已取消，点击“翻译”重试。"
+        ResultEdit.Opt("+ReadOnly")
+        ResultSpeakButton.Enabled := false
+        ResultCopyButton.Enabled := false
+    }
     if IsObject(ResultGui)
         ResultGui.Hide()
 }
@@ -4345,6 +4751,7 @@ ApplyWindowTheme(guiObject, controls*)
 
     SetPreferredAppColorMode(darkModeEnabled)
     AllowDarkModeForWindow(guiObject.Hwnd, darkModeEnabled)
+    OnMessage(0x004E, HandleThemeCustomDraw)
 
     try
     {
@@ -4381,6 +4788,9 @@ ApplyWindowTheme(guiObject, controls*)
             "Ptr", 0
         )
     }
+    ; Refresh cached non-client colors when previewing a theme on an open window.
+    DllCall("user32\SetWindowPos", "Ptr", guiObject.Hwnd, "Ptr", 0,
+        "Int", 0, "Int", 0, "Int", 0, "Int", 0, "UInt", 0x37)
 }
 
 
@@ -4408,7 +4818,10 @@ ApplyAppearanceToOpenWindows()
         ApplySettingsAppearance(SettingsDialog)
 
     if IsObject(ResultGui)
+    {
         ApplyAppearanceToExistingWindow(ResultGui)
+        ThemeTranslationSelectors()
+    }
 
     if IsObject(AboutGui)
         ApplyAppearanceToExistingWindow(AboutGui)
@@ -4434,24 +4847,109 @@ ApplyAppearanceToOpenWindows()
 
 SetPreferredAppColorMode(darkModeEnabled)
 {
-    try DllCall(
-        "uxtheme\#135",
-        "Int", darkModeEnabled ? 1 : 0,
-        "Int"
-    )
+    setMode := GetUxThemeFunction(135)
+    if !setMode
+        return false
+    ; Since Windows 10 1903 this export takes PreferredAppMode, not a Boolean.
+    mode := VerCompare(A_OSVersion, "10.0.18362") >= 0
+        ? (darkModeEnabled ? 2 : 3) ; ForceDark / ForceLight follows the app preview.
+        : (darkModeEnabled ? 1 : 0)
+    try
+    {
+        DllCall(setMode, "Int", mode, "Int")
+        flushThemes := GetUxThemeFunction(136)
+        if flushThemes
+            DllCall(flushThemes)
+        return true
+    }
+    return false
 }
 
 
 AllowDarkModeForWindow(hwnd, enabled)
 {
-    try return DllCall(
-        "uxtheme\#133",
-        "Ptr", hwnd,
-        "Int", enabled ? 1 : 0,
-        "Int"
-    )
-
+    allowDarkMode := GetUxThemeFunction(133)
+    if allowDarkMode
+        try return DllCall(allowDarkMode, "Ptr", hwnd, "Int", enabled ? 1 : 0, "UChar")
     return false
+}
+
+
+GetUxThemeFunction(ordinal)
+{
+    ; DllCall cannot resolve "#133" as an ordinal export. Pass the function address.
+    static module := DllCall("kernel32\LoadLibraryW", "Str", "uxtheme.dll", "Ptr")
+    return module ? DllCall("kernel32\GetProcAddress", "Ptr", module, "Ptr", ordinal, "Ptr") : 0
+}
+
+
+HandleThemeCustomDraw(wParam, lParam, message, hwnd)
+{
+    if !lParam || NumGet(lParam, 2 * A_PtrSize, "Int") != -12 ; NM_CUSTOMDRAW
+        return
+    controlHwnd := NumGet(lParam, 0, "Ptr")
+    try control := GuiCtrlFromHwnd(controlHwnd)
+    catch
+        return
+    if !IsObject(control) || control.Type != "CheckBox"
+        return
+    palette := GetAppearancePalette()
+    if !palette.DarkTitleBar
+        return
+    stageOffset := A_PtrSize = 8 ? 24 : 12
+    if NumGet(lParam, stageOffset, "UInt") != 1 ; CDDS_PREPAINT
+        return
+    DrawDarkCheckbox(control, lParam, palette)
+    return 4 ; CDRF_SKIPDEFAULT: native checkbox state and keyboard behavior remain intact.
+}
+
+
+DrawDarkCheckbox(control, customDraw, palette)
+{
+    dcOffset := A_PtrSize = 8 ? 32 : 16
+    dc := NumGet(customDraw, dcOffset, "Ptr")
+    rect := Buffer(16, 0)
+    DllCall("RtlMoveMemory", "Ptr", rect, "Ptr", customDraw + dcOffset + A_PtrSize, "UPtr", 16)
+    savedDc := DllCall("gdi32\SaveDC", "Ptr", dc, "Int")
+    theme := 0
+    try
+    {
+        brush := DllCall("gdi32\CreateSolidBrush", "UInt", RgbToColorRef(palette.WindowBackground), "Ptr")
+        DllCall("user32\FillRect", "Ptr", dc, "Ptr", rect, "Ptr", brush)
+        DllCall("gdi32\DeleteObject", "Ptr", brush)
+        dpi := DllCall("user32\GetDpiForWindow", "Ptr", control.Hwnd, "UInt")
+        size := Round(13 * dpi / 96)
+        top := NumGet(rect, 4, "Int") + Floor((NumGet(rect, 12, "Int") - NumGet(rect, 4, "Int") - size) / 2)
+        box := Buffer(16, 0)
+        left := NumGet(rect, 0, "Int")
+        NumPut("Int", left, "Int", top, "Int", left + size, "Int", top + size, box)
+        itemState := NumGet(customDraw, dcOffset + A_PtrSize + 16 + A_PtrSize, "UInt")
+        disabled := !control.Enabled
+        state := (control.Value = -1 ? 8 : (control.Value ? 4 : 0))
+            + (disabled ? 4 : (itemState & 1 ? 3 : (itemState & 0x40 ? 2 : 1)))
+        theme := DllCall("uxtheme\OpenThemeData", "Ptr", control.Hwnd, "Str", "Button", "Ptr")
+        drawn := theme && DllCall("uxtheme\DrawThemeBackground", "Ptr", theme, "Ptr", dc,
+            "Int", 3, "Int", state, "Ptr", box, "Ptr", 0, "Int") = 0
+        if !drawn
+            DllCall("user32\DrawFrameControl", "Ptr", dc, "Ptr", box, "UInt", 4,
+                "UInt", (control.Value ? 0x400 : 0) | (disabled ? 0x100 : 0))
+        NumPut("Int", left + size + Round(6 * dpi / 96), rect, 0)
+        font := SendMessage(0x0031, , , , "ahk_id " . control.Hwnd)
+        if font
+            DllCall("gdi32\SelectObject", "Ptr", dc, "Ptr", font)
+        DllCall("gdi32\SetBkMode", "Ptr", dc, "Int", 1)
+        DllCall("gdi32\SetTextColor", "Ptr", dc, "UInt", RgbToColorRef(disabled ? palette.MutedText : palette.Text))
+        DllCall("user32\DrawTextW", "Ptr", dc, "Str", control.Text, "Int", -1,
+            "Ptr", rect, "UInt", 0x8824)
+        if itemState & 0x10 && !(SendMessage(0x0129, , , , "ahk_id " . control.Hwnd) & 1)
+            DllCall("user32\DrawFocusRect", "Ptr", dc, "Ptr", rect)
+    }
+    finally
+    {
+        DllCall("gdi32\RestoreDC", "Ptr", dc, "Int", savedDc)
+        if theme
+            DllCall("uxtheme\CloseThemeData", "Ptr", theme)
+    }
 }
 
 
@@ -4467,7 +4965,7 @@ ApplyDropDownTheme(dropDownControl)
     try DllCall(
         "uxtheme\SetWindowTheme",
         "Ptr", dropDownControl.Hwnd,
-        "Str", palette.ControlTheme,
+        "Str", darkModeEnabled ? "DarkMode_CFD" : "Explorer",
         "Ptr", 0
     )
 
@@ -4576,10 +5074,47 @@ ResizeResultWindow(
     height
 )
 {
+    global ResultView
     if minMax = -1
         return
 
-    resultEdit.Move(10, 10, Max(120, width - 20), Max(72, height - 56))
+    ; Keep the language controls together; only the gap before the service group stretches.
+    nextX := 10
+    for control in [ResultView.SourceList, ResultView.SwapButton, ResultView.TargetList]
+    {
+        control.GetPos(, , &controlWidth)
+        control.Move(nextX, 10)
+        nextX += controlWidth + 12
+    }
+    ResultView.ServiceLabel.GetPos(, , &labelWidth)
+    ResultView.ServiceList.GetPos(, , &selectorWidth)
+    ResultView.ServiceList.Move(width - 10 - selectorWidth, 10)
+    ResultView.ServiceLabel.Move(width - 10 - selectorWidth - 4 - labelWidth, 10)
+    nextX := width - 10
+    for control in [ResultView.TranslateButton, ResultView.ClearButton, ResultView.PasteButton]
+    {
+        control.GetPos(, , &controlWidth)
+        nextX -= controlWidth
+        control.Move(nextX, 46)
+        nextX -= 8
+    }
+    maximized := minMax = 1
+    if maximized
+        sourceHeight := Max(ResultView.SourceMinHeight, Floor((height - 162) / 2))
+    else
+    {
+        paneHeights := GetTranslationPaneHeights(width)
+        sourceHeight := Min(paneHeights.Source,
+            Max(ResultView.SourceMinHeight, height - 162 - ResultView.ResultMinHeight))
+    }
+    ResultView.SourceEdit.Move(10, 82, width - 20, sourceHeight)
+    labelY := ResultView.Expanded ? 82 + sourceHeight + 8 : 82
+    ResultView.ResultLabel.Move(10, labelY)
+    resultY := labelY + 26
+    resultHeight := Max(ResultView.ResultMinHeight, height - 46 - resultY)
+    if !maximized
+        resultHeight := Min(ResultView.ResultMaxHeight, resultHeight)
+    resultEdit.Move(10, resultY, width - 20, resultHeight)
     pinButton.Move(10, height - 36)
     nextX := width - 10
     for control in [closeButton, copyButton, speakButton, pauseButton]
@@ -4589,6 +5124,12 @@ ResizeResultWindow(
         control.Move(nextX, height - 36)
         nextX -= 8
     }
+    widthChanged := ResultView.LastWidth != width
+    modeChanged := ResultView.LastMinMax != minMax
+    ResultView.LastWidth := width
+    ResultView.LastMinMax := minMax
+    if widthChanged || modeChanged
+        QueueTranslationWindowFit()
     RedrawGuiWindow(guiObject)
 }
 

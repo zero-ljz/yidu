@@ -14,6 +14,7 @@ global TestPackagedAutostart := false
 global TestRestartOffers := 0
 global TestPrivacyCancellations := 0
 global PrivacyGui := 0
+global AboutGui := 0
 global TestDuringAutostart := 0
 global TestSaveCancelAttempts := 0
 global TestSaveCancelledBeforeCommit := false
@@ -44,6 +45,7 @@ global TestTranslationResults := []
 global TestTranslationErrors := []
 global TestTranslationTransport := 0
 global ResultGui := 0
+global ResultView := 0
 global TestInputError := ""
 global TestTooltipHwnd := 0
 global TestTranslateHotkeyCount := 0
@@ -58,6 +60,16 @@ try
 {
     TestTraySettings()
     FileAppend("PASS: tray menus, saved settings and quiet startup`n", "*")
+    if TestTranslationOnly
+    {
+        TestTranslationCancellation()
+        TestTranslationLanguages()
+        TestResultSpeechControls()
+        FileAppend("PASS: unified translation window, icons, adaptive pane heights, height limits, paste, clear, drafts and request replacement`n", "*")
+        FileAppend(BuildEdgeSpeechWorkerPowerShell("request", "ready", DllCall("GetCurrentProcessId", "UInt")),
+            TestDirectory . "\worker.ps1", "UTF-8")
+        ExitApp(0)
+    }
     TestTrayOrganization()
     FileAppend("PASS: unified settings, drafts, persistence, rollback, consent and packaged window`n", "*")
     TestHotkeySettings()
@@ -70,6 +82,8 @@ try
     FileAppend("PASS: retained speech input, playback controls, background playback and reopening`n", "*")
     TestTranslationCancellation()
     FileAppend("PASS: translation cancellation, late callbacks and subsequent requests`n", "*")
+    TestTranslationLanguages()
+    FileAppend("PASS: explicit source and target languages for all translation services`n", "*")
     TestSplitting()
     FileAppend("PASS: splitting`n", "*")
     TestPlaybackQueue()
@@ -1064,16 +1078,43 @@ IsTimeoutError(*)
 
 ShowTranslationResult(text, pending := false)
 {
-    global TestTranslationResults, ResultGui
+    global TestTranslationResults, ResultGui, ResultEdit, ResultSpeakButton, ResultCopyButton
     TestTranslationResults.Push(text)
-    ResultGui.Hidden := false
+    if ResultGui is Gui
+        RenderTranslationResult(text, pending)
+    else
+        ResultGui.Hidden := false
+}
+
+
+TestTranslationLanguages()
+{
+    for service in ["tencent", "google", "youdao"]
+    {
+        request := BuildTranslationRequest(service, "hello & 世界", "zh", 1, 1, "ja")
+        if service = "youdao"
+            Assert(InStr(request.Body, "&from=ja&to=zh-CHS"), "Youdao uses explicit language pair")
+        else if service = "google"
+            Assert(InStr(request.Url, "&sl=ja&tl=zh-CN"), "Google uses explicit language pair")
+        else
+            Assert(InStr(request.Url, "source=ja&target=zh"), "Tencent uses explicit language pair")
+        Assert(InStr(request.Body . request.Url, "hello%20%26%20"), "Source text encoded safely")
+        request := BuildTranslationRequest(service, "hello", "en", 1, 1)
+        Assert(InStr(request.Body . request.Url, service = "youdao" ? "from=Auto&to=en"
+            : (service = "google" ? "sl=auto&tl=en" : "source=auto&target=en")), "Automatic source retains explicit target")
+    }
+    Assert(GetTranslationTargetLanguage("hello world") = "zh", "English defaults to Chinese")
+    Assert(GetTranslationTargetLanguage("你好世界") = "en", "Chinese defaults to English")
 }
 
 ShowTranslationError(message)
 {
     global TestTranslationErrors, ResultGui
     TestTranslationErrors.Push(message)
-    ResultGui.Hidden := false
+    if ResultGui is Gui
+        RenderTranslationResult("翻译失败：`r`n" . message)
+    else
+        ResultGui.Hidden := false
 }
 
 AssertInputLayout(dialog, width, height)
@@ -1355,20 +1396,31 @@ TestResultSpeechControls()
 {
     global ResultGui, ResultEdit, ResultPinButton, ResultPauseButton, ResultSpeakButton
     global ResultCopyButton, ResultCloseButton, SpeechSession, SpeechMciAlias
-    global ResultIconButtons, ResultPinned
+    global ResultIconButtons, ResultPinned, ResultView
 
     savedClipboard := ClipboardAll()
     tooltipWindows := []
-    CreateResultWindow()
+    A_Clipboard := "initial original"
+    OpenTranslationWindow()
     try
     {
-        ResultGui.Show("Hide w400 h200")
+        Assert(ResultView.SourceEdit.Value = "initial original" && ResultView.Expanded,
+            "First opening creates unified window and prefills clipboard")
+        Assert(!ResultCopyButton.Enabled && !ResultSpeakButton.Enabled, "New window has no result actions")
+        TestAppearanceSwitching()
+        FileAppend("PASS: dark/light preview, native title bars, readable checkbox painting and settings rollback`n", "*")
+        ResultGui.Show("Hide w560 h480")
+        TestUnifiedTranslationWindow()
         resultDialog := {Gui: ResultGui, IconButtons: ResultIconButtons}
         for hwnd, button in ResultIconButtons
             tooltipWindows.Push(button.Tooltip.Hwnd)
         if ResultIconButtons.Count
         {
-            Assert(ResultIconButtons.Count = 5, "Result window initializes all five icons")
+            Assert(ResultIconButtons.Count = 10, "Translation window initializes all ten icons")
+            AssertInputIcon(resultDialog, ResultView.SwapButton, 0xE8AB, "交换语言")
+            AssertInputIcon(resultDialog, ResultView.PasteButton, 0xE77F, "粘贴")
+            AssertInputIcon(resultDialog, ResultView.ClearButton, 0xE74D, "清空")
+            AssertInputIcon(resultDialog, ResultView.TranslateButton, 0xE72C, "翻译")
             AssertInputIcon(resultDialog, ResultPinButton, 0xE718, "钉住")
             AssertInputIcon(resultDialog, ResultCopyButton, 0xE8C8, "复制结果")
             AssertInputIcon(resultDialog, ResultCloseButton, 0xE711, "关闭")
@@ -1382,7 +1434,7 @@ TestResultSpeechControls()
         }
         ToggleResultPinned()
         Assert(!ResultPinned, "Result pin disabled")
-        for size in [{Width: 400, Height: 128}, {Width: 800, Height: 380}]
+        for size in [{Width: 520, Height: 290}, {Width: 800, Height: 600}]
         {
             ResizeResultWindow(ResultEdit, ResultPinButton, ResultPauseButton, ResultSpeakButton,
                 ResultCopyButton, ResultCloseButton, ResultGui, 0, size.Width, size.Height)
@@ -1435,12 +1487,402 @@ TestResultSpeechControls()
             Assert(!DllCall("IsWindow", "Ptr", tooltipHwnd), "Result icon tooltips destroyed with window")
         ResultIconButtons := Map()
         ResultGui := 0
+        ResultView := 0
         ResultEdit := 0
         ResultPinButton := 0
         ResultPauseButton := {Text: "暂停", Enabled: false}
         ResultSpeakButton := {Text: "朗读"}
         ResultCopyButton := 0
         ResultCloseButton := 0
+    }
+}
+
+TestUnifiedTranslationWindow()
+{
+    global ResultGui, ResultView, ResultEdit, ResultSpeakButton, ResultCopyButton
+    global ResultPinButton, ResultPauseButton, ResultCloseButton
+    global ActiveTranslationRequest, TranslationBusy, TestTranslationTransport, CONFIG
+    savedService := CONFIG.TranslationService
+    try
+    {
+        TestTranslationAutoHeight()
+        TestTranslationMaximizedLayout()
+        TestTranslationActionAndSwap()
+        for size in [{Width: 520, Height: 290}, {Width: 800, Height: 600}]
+        {
+            for expanded in [true, false]
+            {
+                ResultView.Expanded := expanded
+                ResizeResultWindow(ResultEdit, ResultPinButton, ResultPauseButton, ResultSpeakButton,
+                    ResultCopyButton, ResultCloseButton, ResultGui, 0, size.Width, size.Height)
+                previousRight := 0
+                for control in [ResultView.SourceList, ResultView.SwapButton,
+                    ResultView.TargetList, ResultView.ServiceLabel, ResultView.ServiceList]
+                {
+                    control.GetPos(&x, , &w)
+                    Assert(x >= previousRight + 4 && x + w <= size.Width - 10,
+                        "Language selectors, swap and service fit without overlap")
+                    previousRight := x + w
+                }
+                ResultView.SourceEdit.GetPos(, &sourceY, , &sourceHeight)
+                ResultEdit.GetPos(, &resultY, , &resultHeight)
+                Assert(resultY >= (expanded ? sourceY + sourceHeight + 30 : 100), "Original text above translation")
+                Assert(resultHeight >= 60 && resultY + resultHeight <= size.Height - 46, "Translation fits above footer")
+                previousRight := 0
+                for control in [ResultView.ToggleButton, ResultView.PasteButton, ResultView.ClearButton, ResultView.TranslateButton]
+                {
+                    control.GetPos(&x, , &w)
+                    Assert(x >= previousRight + 6 && x + w <= size.Width - 10, "Source action buttons fit without overlap")
+                    previousRight := x + w
+                }
+            }
+        }
+        SetTranslationSourceExpanded(false)
+        Assert(!ResultView.Expanded && !ResultView.SourceEdit.Visible, "Original text collapses")
+        if ResultIconButtons.Count
+            AssertInputIcon({Gui: ResultGui, IconButtons: ResultIconButtons}, ResultView.ToggleButton, 0xE70D, "展开原文")
+        A_Clipboard := "new original`r`n第二行"
+        PasteTranslationSource()
+        Assert(StrReplace(ResultView.SourceEdit.Value, "`r") = StrReplace(A_Clipboard, "`r")
+            && ResultView.Expanded, "Paste replaces and expands source")
+        ResultView.SourceList.Choose(4) ; Japanese
+        ResultView.TargetList.Choose(2) ; Chinese
+        ResultView.ServiceList.Choose(2) ; Youdao
+        TestTranslationTransport := TestTranslationHttp()
+        ChangeTranslationOptions(ResultView.ServiceList)
+        oldRequest := ActiveTranslationRequest
+        Assert(oldRequest.SourceLanguage = "ja" && oldRequest.TargetLanguage = "zh"
+            && oldRequest.Service = "youdao", "Window options reach request")
+        ResultView.TargetList.Choose(3) ; English
+        replacement := TestTranslationHttp()
+        oldTransport := TestTranslationTransport
+        TestTranslationTransport := replacement
+        ChangeTranslationOptions(ResultView.TargetList)
+        Assert(oldTransport.Aborts = 1 && ActiveTranslationRequest != oldRequest
+            && ActiveTranslationRequest.TargetLanguage = "en", "Option changes replace pending request")
+        ClearTranslationSource()
+        Assert(replacement.Aborts = 1 && !TranslationBusy && !IsObject(ActiveTranslationRequest), "Clear cancels pending translation")
+        Assert(ResultView.SourceEdit.Value = "" && ResultEdit.Value = "" && ResultView.Expanded, "Clear empties source and result")
+        Assert(!ResultSpeakButton.Enabled && !ResultCopyButton.Enabled, "Empty result has no copy or speech action")
+        before := replacement.Aborts
+        RetranslateFromWindow()
+        Assert(!IsObject(ActiveTranslationRequest) && replacement.Aborts = before, "Empty source does not submit")
+        ResultView.SourceEdit.Value := "保留的原文"
+        HideResultWindow()
+        Assert(ResultView.SourceEdit.Value = "保留的原文", "Closing retains source draft")
+        originalHwnd := ResultGui.Hwnd
+        SetTranslationSourceExpanded(false)
+        OpenTranslationWindow()
+        Assert(ResultGui.Hwnd = originalHwnd && ResultView.SourceEdit.Value = "保留的原文"
+            && !ResultView.Expanded, "Reopening reuses unified window and collapsed draft")
+        SetTranslationSourceExpanded(true)
+        TestTranslationTransport := TestTranslationHttp()
+        OpenTranslationWindow("new selection")
+        Assert(ResultGui.Hwnd = originalHwnd && ResultView.SourceEdit.Value = "new selection"
+            && !ResultView.Expanded && IsObject(ActiveTranslationRequest), "Selected text replaces source and translates with source collapsed")
+        HideResultWindow()
+        Assert(InStr(ResultEdit.Value, "翻译已取消") && !TranslationBusy, "Closing pending window replaces stale progress with cancellation status")
+    }
+    finally
+    {
+        CancelTranslationRequest()
+        SetTranslationService(savedService)
+        ResultView.SourceList.Choose(1)
+        ResultView.TargetList.Choose(1)
+        ResultView.ServiceList.Choose(GetTranslationServiceIndex(savedService))
+    }
+}
+
+TestTranslationAutoHeight()
+{
+    global ResultView, ResultGui, ResultEdit
+    ResultView.Expanded := true
+    ResultView.SourceEdit.Visible := true
+    ResultView.SourceEdit.Value := "short source"
+    ResultEdit.Value := "short result"
+    FitTranslationWindow()
+    ResultView.SourceEdit.GetPos(, , , &sourceHeight)
+    ResultEdit.GetPos(, , , &resultHeight)
+    ResultGui.GetClientPos(, , , &shortHeight)
+    Assert(sourceHeight = ResultView.SourceMinHeight && resultHeight = ResultView.ResultMinHeight,
+        "Short content uses minimum pane heights")
+    Assert(shortHeight = 290, "Short content shrinks window to expanded minimum")
+
+    ResultView.SourceEdit.Value := RepeatText("原文很长，需要换行显示。`n", 100)
+    ResultEdit.Value := RepeatText("Translated content with explicit line breaks.`n", 100)
+    FitTranslationWindow()
+    ResultView.SourceEdit.GetPos(, , , &sourceHeight)
+    ResultEdit.GetPos(, &resultY, , &resultHeight)
+    ResultGui.GetClientPos(, , , &longHeight)
+    preferred := GetTranslationPaneHeights(560)
+    Assert(preferred.Source = ResultView.SourceMaxHeight && preferred.Result = ResultView.ResultMaxHeight,
+        "Long content is capped independently for both panes")
+    Assert(sourceHeight >= ResultView.SourceMinHeight && sourceHeight <= ResultView.SourceMaxHeight
+        && resultHeight >= ResultView.ResultMinHeight && resultHeight <= ResultView.ResultMaxHeight,
+        "Rendered pane heights respect minimum and maximum")
+    Assert(longHeight > shortHeight && longHeight <= 742 && resultY + resultHeight <= longHeight - 46,
+        "Window grows for content within height limit")
+    SetTranslationSourceExpanded(false)
+    ResultGui.GetClientPos(, , , &collapsedHeight)
+    Assert(collapsedHeight < longHeight && collapsedHeight <= 514, "Collapsing source shrinks window")
+    SetTranslationSourceExpanded(true)
+
+    ResultView.SourceEdit.Value := RepeatText("Words wrap naturally. ", 18)
+    narrow := MeasureTranslationEditHeight(ResultView.SourceEdit, 500, 64, 220)
+    wide := MeasureTranslationEditHeight(ResultView.SourceEdit, 780, 64, 220)
+    Assert(narrow > wide, "Text measurement responds to wrapping at different widths")
+    ResultView.SourceEdit.Value := RepeatText("W", 500)
+    Assert(MeasureTranslationEditHeight(ResultView.SourceEdit, 500, 64, 220) > 64,
+        "Unbroken text contributes wrapped lines")
+    ResultView.SourceEdit.Value := "short"
+    ResultEdit.Value := "short"
+    FitTranslationWindow()
+    ResultGui.GetClientPos(, , , &height)
+    Assert(height = shortHeight, "Deleting content returns window to minimum height")
+}
+
+TestAppearanceSwitching()
+{
+    global CONFIG, CONFIG_PATH, SettingsDialog, ResultGui, ResultView, ResultEdit
+    preferenceBefore := FileRead(CONFIG_PATH)
+    ShowSettings()
+    dialog := SettingsDialog
+    try
+    {
+        for index in [2, 3, 2]
+        {
+            dialog.ThemeList.Choose(index)
+            PreviewSettingsAppearance(dialog)
+            dark := index = 2
+            palette := GetAppearancePalette()
+            Assert(GetUxThemeFunction(133) && GetUxThemeFunction(135), "Dark mode ordinal exports resolve")
+            shouldUseDark := GetUxThemeFunction(132)
+            if shouldUseDark
+                Assert(!!DllCall(shouldUseDark, "UChar") = dark, "Native app theme follows explicit preview")
+            allowedForWindow := GetUxThemeFunction(137)
+            if allowedForWindow
+                Assert(!!DllCall(allowedForWindow, "Ptr", ResultGui.Hwnd, "UChar") = dark,
+                    "Existing translation window follows preview")
+            for window in [dialog.Gui, ResultGui]
+            {
+                enabled := -1
+                hr := DllCall("dwmapi\DwmGetWindowAttribute", "Ptr", window.Hwnd, "Int", 20,
+                    "Int*", &enabled, "Int", 4, "Int")
+                if hr = 0
+                    Assert(!!enabled = dark, "Title bar follows dark and light preview")
+            }
+            Assert(ControlGetStyle(ResultEdit) & 0x800, "Theme preview preserves result read-only state")
+            for checkbox in [dialog.Transparency, dialog.ResultPosition, dialog.Autostart, dialog.Admin]
+            {
+                original := checkbox.Value
+                if dark
+                {
+                    pixels := InspectCheckboxPainting(checkbox)
+                    Assert(pixels.Background = RgbToColorRef(palette.WindowBackground),
+                        "Dark checkbox paints the window background")
+                    Assert(pixels.LightText > 4, "Dark checkbox paints readable light text")
+                }
+                Assert(checkbox.Type = "CheckBox" && checkbox.Value = original,
+                    "Theme switch preserves native checkbox semantics and value")
+            }
+            SelectSettingsPage(dialog, 2)
+            if dark
+                Assert(InspectCheckboxPainting(dialog.Consent).LightText > 4,
+                    "Service consent checkbox has readable dark theme text")
+            SelectSettingsPage(dialog, 1)
+            Assert(FileRead(CONFIG_PATH) == preferenceBefore, "Theme preview does not persist settings")
+        }
+    }
+    finally CloseSettings(dialog)
+    Assert(FileRead(CONFIG_PATH) == preferenceBefore, "Closing theme preview preserves saved preferences")
+}
+
+
+InspectCheckboxPainting(control)
+{
+    ; Render the real native control into a bitmap, including its NM_CUSTOMDRAW callback.
+    rect := Buffer(16, 0)
+    DllCall("user32\GetClientRect", "Ptr", control.Hwnd, "Ptr", rect)
+    width := NumGet(rect, 8, "Int"), height := NumGet(rect, 12, "Int")
+    dc := DllCall("user32\GetDC", "Ptr", control.Hwnd, "Ptr")
+    memoryDc := DllCall("gdi32\CreateCompatibleDC", "Ptr", dc, "Ptr")
+    bitmap := DllCall("gdi32\CreateCompatibleBitmap", "Ptr", dc, "Int", width, "Int", height, "Ptr")
+    oldBitmap := DllCall("gdi32\SelectObject", "Ptr", memoryDc, "Ptr", bitmap, "Ptr")
+    try
+    {
+        DllCall("gdi32\PatBlt", "Ptr", memoryDc, "Int", 0, "Int", 0,
+            "Int", width, "Int", height, "UInt", 0x00000042) ; BLACKNESS
+        SendMessage(0x0318, memoryDc, 12, , "ahk_id " . control.Hwnd) ; WM_PRINTCLIENT
+        lightText := 0
+        dpi := DllCall("user32\GetDpiForWindow", "Ptr", control.Hwnd, "UInt")
+        startX := Round(22 * dpi / 96)
+        Loop Ceil(height / 2)
+        {
+            y := (A_Index - 1) * 2
+            Loop Floor((width - startX) / 2)
+            {
+                x := startX + (A_Index - 1) * 2
+                color := DllCall("gdi32\GetPixel", "Ptr", memoryDc, "Int", x, "Int", y, "UInt")
+                if (color & 255) > 190 && ((color >> 8) & 255) > 190 && ((color >> 16) & 255) > 190
+                    lightText++
+            }
+        }
+        return {LightText: lightText,
+            Background: DllCall("gdi32\GetPixel", "Ptr", memoryDc, "Int", width - 2,
+                "Int", Floor(height / 2), "UInt")}
+    }
+    finally
+    {
+        DllCall("gdi32\SelectObject", "Ptr", memoryDc, "Ptr", oldBitmap)
+        DllCall("gdi32\DeleteObject", "Ptr", bitmap)
+        DllCall("gdi32\DeleteDC", "Ptr", memoryDc)
+        DllCall("user32\ReleaseDC", "Ptr", control.Hwnd, "Ptr", dc)
+    }
+}
+
+
+TestTranslationMaximizedLayout()
+{
+    global ResultGui, ResultView, ResultEdit, ResultPinButton, ResultPauseButton
+    global ResultSpeakButton, ResultCopyButton, ResultCloseButton
+    ResultView.SourceEdit.Value := "short source"
+    ResultEdit.Value := "short result"
+    SetTranslationSourceExpanded(true)
+    try
+    {
+        ResultGui.Show("NA Maximize")
+        Assert(DllCall("user32\IsZoomed", "Ptr", ResultGui.Hwnd), "Window maximizes")
+        FitTranslationWindow()
+        ResultGui.GetClientPos(, , &width, &height)
+        ResultView.SourceEdit.GetPos(, &sourceY, , &sourceHeight)
+        ResultEdit.GetPos(, &resultY, , &resultHeight)
+        Assert(Abs(sourceHeight - resultHeight) <= 1, "Maximized panes share available height equally")
+        Assert(sourceY + sourceHeight + 34 = resultY && resultY + resultHeight = height - 46,
+            "Maximized panes fill content area down to footer")
+        if height > 882
+            Assert(sourceHeight > ResultView.SourceMaxHeight && resultHeight > ResultView.ResultMaxHeight,
+                "Maximized panes can exceed automatic content height caps")
+
+        monitor := DllCall("user32\MonitorFromWindow", "Ptr", ResultGui.Hwnd, "UInt", 2, "Ptr")
+        info := Buffer(40, 0)
+        NumPut("UInt", 40, info)
+        DllCall("user32\GetMonitorInfoW", "Ptr", monitor, "Ptr", info.Ptr)
+        GetPhysicalWindowRect(ResultGui.Hwnd, , , , &outerHeight)
+        Assert(outerHeight >= NumGet(info, 32, "Int") - NumGet(info, 24, "Int"),
+            "Maximization fills monitor work area without automatic window height cap")
+
+        SetTranslationSourceExpanded(false)
+        ResultEdit.GetPos(, &resultY, , &resultHeight)
+        ResultGui.GetClientPos(, , , &height)
+        Assert(DllCall("user32\IsZoomed", "Ptr", ResultGui.Hwnd)
+            && resultY = 108 && resultY + resultHeight = height - 46,
+            "Collapsed maximized result uses all available space")
+        SetTranslationSourceExpanded(true)
+        ResultView.SourceEdit.GetPos(, , , &sourceHeight)
+        ResultEdit.GetPos(, , , &resultHeight)
+        Assert(Abs(sourceHeight - resultHeight) <= 1, "Expanding maximized source redistributes height")
+    }
+    finally
+    {
+        WinRestore("ahk_id " . ResultGui.Hwnd)
+        FitTranslationWindow()
+    }
+    ResultGui.GetClientPos(, , , &height)
+    Assert(height = 290, "Restoring window returns to automatic content height")
+}
+
+TestTranslationActionAndSwap()
+{
+    global ResultGui, ResultView, ResultEdit, ResultIconButtons, TranslationBusy
+    global ActiveTranslationRequest, TestTranslationTransport, TestTranslationErrors
+    ResultView.SourceEdit.Value := "hello world"
+    ResultView.SourceList.Choose(4) ; Japanese
+    ResultView.TargetList.Choose(3) ; English
+    TestTranslationTransport := TestTranslationHttp()
+    try
+    {
+        Assert(ControlGetStyle(ResultEdit) & 0x800, "Translation is read-only before submitting")
+        Assert(!(ControlGetStyle(ResultView.SourceEdit) & 0x800), "Original remains editable")
+        SwapTranslationLanguages()
+        Assert(ResultView.SourceList.Value = 3 && ResultView.TargetList.Value = 4,
+            "Swap exchanges explicit languages")
+        Assert(ActiveTranslationRequest.SourceLanguage = "en" && ActiveTranslationRequest.TargetLanguage = "ja",
+            "Swap submits reversed language pair")
+        Assert(ResultView.TranslateButton.Enabled && ResultView.TranslateButton.Text = "取消翻译",
+            "Pending translation replaces action with cancel button")
+        Assert(ControlGetStyle(ResultEdit) & 0x800, "Pending translation stays read-only")
+        if ResultIconButtons.Count
+            AssertInputIcon({Gui: ResultGui, IconButtons: ResultIconButtons}, ResultView.TranslateButton,
+                0xE71A, "取消翻译")
+        TestTranslationTransport.Completed := true
+        CheckTranslationRequest()
+        Assert(!TranslationBusy && ResultView.TranslateButton.Enabled && ResultView.TranslateButton.Text = "翻译",
+            "Completion restores translation action")
+        if ResultIconButtons.Count
+            AssertInputIcon({Gui: ResultGui, IconButtons: ResultIconButtons}, ResultView.TranslateButton,
+                0xE72C, "翻译")
+        Assert(ControlGetStyle(ResultEdit) & 0x800, "Completed translation stays read-only")
+        result := ResultEdit.Value
+        SendMessage(0x0102, Ord("x"), 1, , "ahk_id " . ResultEdit.Hwnd)
+        Assert(ResultEdit.Value = result, "Character input cannot modify translation")
+
+        ResultView.SourceList.Choose(1)
+        ResultView.TargetList.Choose(2)
+        TestTranslationTransport := TestTranslationHttp()
+        SwapTranslationLanguages()
+        Assert(ResultView.SourceList.Value = 2 && ResultView.TargetList.Value = 3,
+            "Swap resolves automatic English source to Chinese-English pair")
+        oldTransport := TestTranslationTransport
+        TestTranslationTransport := TestTranslationHttp()
+        SwapTranslationLanguages()
+        Assert(oldTransport.Aborts = 1 && ResultView.TranslateButton.Text = "取消翻译",
+            "Swapping pending request cancels old transport and preserves cancel action")
+        cancelledTransport := TestTranslationTransport
+        DispatchResultButton(ResultView.TranslateButton)
+        Assert(cancelledTransport.Aborts = 1 && !TranslationBusy && !IsObject(ActiveTranslationRequest),
+            "Clicking cancel aborts active translation")
+        Assert(ResultView.TranslateButton.Text = "翻译" && InStr(ResultEdit.Value, "翻译已取消")
+            && DllCall("IsWindowVisible", "Ptr", ResultGui.Hwnd), "Cancel restores action and keeps window open")
+        cancelledTransport.Completed := true
+        CheckTranslationRequest()
+        Assert(InStr(ResultEdit.Value, "翻译已取消"), "Cancelled result cannot overwrite cancellation status")
+        TestTranslationTransport := TestTranslationHttp()
+        DispatchResultButton(ResultView.TranslateButton)
+        Assert(TranslationBusy && ResultView.TranslateButton.Text = "取消翻译",
+            "Same button starts a fresh translation after cancellation")
+        ClearTranslationSource()
+        Assert(!TranslationBusy && ResultView.TranslateButton.Text = "翻译", "Clear restores translate action")
+        Assert(ControlGetStyle(ResultEdit) & 0x800, "Clear retains read-only result")
+
+        ResultView.SourceEdit.Value := "你好世界"
+        ResultView.SourceList.Choose(1)
+        ResultView.TargetList.Choose(1)
+        TestTranslationTransport := TestTranslationHttp()
+        SwapTranslationLanguages()
+        Assert(ResultView.SourceList.Value = 3 && ResultView.TargetList.Value = 2,
+            "Swap resolves automatic Chinese-English direction")
+        HideResultWindow()
+        Assert(ResultView.TranslateButton.Enabled && ResultView.TranslateButton.Text = "翻译",
+            "Closing cancels and restores action")
+        Assert(ControlGetStyle(ResultEdit) & 0x800, "Cancelled translation stays read-only")
+
+        TestTranslationTransport := TestTranslationHttp()
+        RetranslateFromWindow()
+        ActiveTranslationRequest.MaximumAttempts := 1
+        ActiveTranslationRequest.Attempt := 1
+        ActiveTranslationRequest.StartedAt := 0
+        CheckTranslationRequest()
+        Assert(!TranslationBusy && ResultView.TranslateButton.Enabled
+            && InStr(ResultEdit.Value, "翻译失败"), "Timeout restores action and read-only error")
+        Assert(ControlGetStyle(ResultEdit) & 0x800, "Failed translation stays read-only")
+        TestTranslationErrors.Pop()
+    }
+    finally
+    {
+        CancelTranslationRequest()
+        ResultView.SourceList.Choose(1)
+        ResultView.TargetList.Choose(1)
+        ResultGui.Hide()
     }
 }
 
@@ -1612,6 +2054,7 @@ ApplyAppearanceToOpenWindows()
 {
     global TestAppearanceUpdates
     TestAppearanceUpdates += 1
+    RenderAppearanceToOpenWindows()
 }
 
 EnsureOnlineServicesConsent()
