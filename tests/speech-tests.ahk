@@ -1522,6 +1522,7 @@ TestUnifiedTranslationWindow()
     {
         ShowResultAtMouse := true
         TestTranslationAutoHeight()
+        TestTranslationWidthOnlyResize()
         TestTranslationMaximizedLayout()
         TestTranslationActionAndSwap()
         for size in [{Width: 520, Height: 290}, {Width: 800, Height: 600}]
@@ -1919,6 +1920,36 @@ InspectCheckboxPainting(control)
         DllCall("gdi32\DeleteObject", "Ptr", bitmap)
         DllCall("gdi32\DeleteDC", "Ptr", memoryDc)
         DllCall("user32\ReleaseDC", "Ptr", control.Hwnd, "Ptr", dc)
+    }
+}
+
+
+TestTranslationWidthOnlyResize()
+{
+    global ResultGui
+    rect := Buffer(16, 0)
+    DllCall("user32\GetWindowRect", "Ptr", ResultGui.Hwnd, "Ptr", rect)
+    left := NumGet(rect, 0, "Int"), top := NumGet(rect, 4, "Int")
+    right := NumGet(rect, 8, "Int"), bottom := NumGet(rect, 12, "Int")
+    midX := Floor((left + right) / 2), midY := Floor((top + bottom) / 2)
+    for point in [{X: midX, Y: top + 1, Hit: 18}, {X: midX, Y: bottom - 1, Hit: 18},
+        {X: left + 1, Y: midY, Hit: 10}, {X: right - 1, Y: midY, Hit: 11},
+        {X: left + 1, Y: top + 1, Hit: 10}, {X: left + 1, Y: bottom - 1, Hit: 10},
+        {X: right - 1, Y: top + 1, Hit: 11}, {X: right - 1, Y: bottom - 1, Hit: 11}]
+    {
+        coordinates := (point.X & 0xFFFF) | ((point.Y & 0xFFFF) << 16)
+        hit := SendMessage(0x0084, 0, coordinates, , "ahk_id " . ResultGui.Hwnd)
+        Assert(hit = point.Hit, "Native window borders expose horizontal resizing only")
+    }
+    Loop 8
+    {
+        proposed := Buffer(16, 0)
+        NumPut("Int", left - 20, "Int", top - 30, "Int", right + 40, "Int", bottom + 50, proposed)
+        SendMessage(0x0214, A_Index, proposed.Ptr, , "ahk_id " . ResultGui.Hwnd)
+        Assert(NumGet(proposed, 4, "Int") = top && NumGet(proposed, 12, "Int") = bottom,
+            "Interactive sizing keeps height and vertical position")
+        Assert(NumGet(proposed, 0, "Int") = left - 20 && NumGet(proposed, 8, "Int") = right + 40,
+            "Interactive sizing permits width changes")
     }
 }
 

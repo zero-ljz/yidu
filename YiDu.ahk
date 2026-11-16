@@ -7,12 +7,12 @@
 ;@Ahk2Exe-SetCompanyName zero-ljz（空心）
 ;@Ahk2Exe-SetDescription 译读
 ;@Ahk2Exe-SetCopyright Copyright (c) 2026 zero-ljz
-;@Ahk2Exe-SetVersion 1.5.0.0
+;@Ahk2Exe-SetVersion 1.5.1.0
 
 SendMode "Input"
 CoordMode "Mouse", "Screen"
 
-global APP_VERSION := "1.5.0"
+global APP_VERSION := "1.5.1"
 global CONFIG := {
     Hotkey: "^F1",
     SpeakHotkey: "^F2",
@@ -3253,6 +3253,8 @@ CreateResultWindow()
     ResultCloseButton.OnEvent("Click", HideResultWindow)
     ResultGui.OnEvent("Close", HideResultWindow)
     ResultGui.OnEvent("Escape", HideResultWindow)
+    OnMessage(0x0084, HandleTranslationWindowSizing) ; WM_NCHITTEST
+    OnMessage(0x0214, HandleTranslationWindowSizing) ; WM_SIZING
     ResultGui.OnEvent(
         "Size",
         ResizeResultWindow.Bind(
@@ -3267,6 +3269,38 @@ CreateResultWindow()
     ApplyAppearanceToExistingWindow(ResultGui)
     ThemeTranslationSelectors()
     UpdateSpeechControls()
+}
+
+
+HandleTranslationWindowSizing(wParam, lParam, message, hwnd)
+{
+    global ResultGui
+    if !IsObject(ResultGui) || hwnd != ResultGui.Hwnd
+        || DllCall("user32\IsZoomed", "Ptr", hwnd)
+        return
+
+    if message = 0x0084
+    {
+        hit := DllCall("user32\DefWindowProcW", "Ptr", hwnd, "UInt", message,
+            "UPtr", wParam, "Ptr", lParam, "Ptr")
+        switch hit
+        {
+            case 12, 15: return 18 ; Top/bottom borders do not resize.
+            case 13, 16: return 10 ; Left corners resize width only.
+            case 14, 17: return 11 ; Right corners resize width only.
+        }
+    }
+    else if message = 0x0214 && lParam
+    {
+        ; Restrict interactive sizing only; content fitting and maximize remain free to change height.
+        currentRect := Buffer(16, 0)
+        if DllCall("user32\GetWindowRect", "Ptr", hwnd, "Ptr", currentRect)
+        {
+            NumPut("Int", NumGet(currentRect, 4, "Int"), lParam, 4)
+            NumPut("Int", NumGet(currentRect, 12, "Int"), lParam, 12)
+            return true
+        }
+    }
 }
 
 
