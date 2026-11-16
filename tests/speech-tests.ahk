@@ -32,6 +32,8 @@ global TestWorkerStops := 0
 global TestConsent := true
 global TestFirstRunCount := 0
 global TestAppearanceUpdates := 0
+global TestSettingsShows := []
+global TestResultPositionCalls := 0
 global ActiveInputDialog := 0
 global InputDrafts := Map()
 global TestInputClipboard := "Alpha"
@@ -1396,19 +1398,28 @@ TestResultSpeechControls()
 {
     global ResultGui, ResultEdit, ResultPinButton, ResultPauseButton, ResultSpeakButton
     global ResultCopyButton, ResultCloseButton, SpeechSession, SpeechMciAlias
-    global ResultIconButtons, ResultPinned, ResultView
+    global ResultIconButtons, ResultPinned, ResultView, TestResultPositionCalls
 
     savedClipboard := ClipboardAll()
     tooltipWindows := []
     A_Clipboard := "initial original"
-    OpenTranslationWindow()
+    TranslateFromTray()
     try
     {
         Assert(ResultView.SourceEdit.Value = "initial original" && ResultView.Expanded,
             "First opening creates unified window and prefills clipboard")
+        Assert(TestResultPositionCalls = 0, "First tray opening uses the default position instead of the mouse")
         Assert(!ResultCopyButton.Enabled && !ResultSpeakButton.Enabled, "New window has no result actions")
+        Assert(!ResultEdit.Visible && !ResultView.ResultLabel.Visible && !ResultCopyButton.Visible
+            && !ResultSpeakButton.Visible && !ResultPauseButton.Visible, "New window hides empty result and related actions")
+        ResultGui.GetClientPos(, , , &emptyHeight)
+        Assert(emptyHeight = 192, "New window has no unused result area")
+        TestTranslationEmptyLayout()
+        TestSettingsOpening()
         TestAppearanceSwitching()
         FileAppend("PASS: dark/light preview, native title bars, readable checkbox painting and settings rollback`n", "*")
+        TestTranslationWindowActivation()
+        FileAppend("PASS: translation blur hiding, pinning, owned popups and retained drafts; settings ready before showing`n", "*")
         ResultGui.Show("Hide w560 h480")
         TestUnifiedTranslationWindow()
         resultDialog := {Gui: ResultGui, IconButtons: ResultIconButtons}
@@ -1502,9 +1513,14 @@ TestUnifiedTranslationWindow()
     global ResultGui, ResultView, ResultEdit, ResultSpeakButton, ResultCopyButton
     global ResultPinButton, ResultPauseButton, ResultCloseButton
     global ActiveTranslationRequest, TranslationBusy, TestTranslationTransport, CONFIG
+    global TestResultPositionCalls, ShowResultAtMouse, TestSelectedText
+    global ResultPinned
     savedService := CONFIG.TranslationService
+    savedPosition := ShowResultAtMouse
+    savedSelection := TestSelectedText
     try
     {
+        ShowResultAtMouse := true
         TestTranslationAutoHeight()
         TestTranslationMaximizedLayout()
         TestTranslationActionAndSwap()
@@ -1529,7 +1545,7 @@ TestUnifiedTranslationWindow()
                 Assert(resultY >= (expanded ? sourceY + sourceHeight + 30 : 100), "Original text above translation")
                 Assert(resultHeight >= 60 && resultY + resultHeight <= size.Height - 46, "Translation fits above footer")
                 previousRight := 0
-                for control in [ResultView.ToggleButton, ResultView.PasteButton, ResultView.ClearButton, ResultView.TranslateButton]
+                for control in [ResultView.ToggleButton, ResultView.ClearButton, ResultView.PasteButton, ResultView.TranslateButton]
                 {
                     control.GetPos(&x, , &w)
                     Assert(x >= previousRight + 6 && x + w <= size.Width - 10, "Source action buttons fit without overlap")
@@ -1572,12 +1588,36 @@ TestUnifiedTranslationWindow()
         Assert(ResultView.SourceEdit.Value = "保留的原文", "Closing retains source draft")
         originalHwnd := ResultGui.Hwnd
         SetTranslationSourceExpanded(false)
-        OpenTranslationWindow()
+        positionCalls := TestResultPositionCalls
+        WinMove(30, 40, , , "ahk_id " . ResultGui.Hwnd)
+        TranslateFromTray()
+        ResultGui.GetPos(&openedX, &openedY)
+        Assert(TestResultPositionCalls = positionCalls && (openedX != 30 || openedY != 40),
+            "Unpinned tray reopening recenters instead of restoring dragged position or following mouse")
+        HideResultWindow()
+        ToggleResultPinned()
+        try
+        {
+            WinMove(50, 60, , , "ahk_id " . ResultGui.Hwnd)
+            TranslateFromTray()
+            ResultGui.GetPos(&pinnedX, &pinnedY)
+            Assert(pinnedX = 50 && pinnedY = 60 && TestResultPositionCalls = positionCalls,
+                "Pinned tray reopening preserves the pinned position")
+        }
+        finally ToggleResultPinned()
+        HideResultWindow()
+        TranslateFromTray()
+        ResultGui.GetPos(&reopenedX, &reopenedY)
+        Assert(reopenedX = openedX && reopenedY = openedY,
+            "Unpinning restores consistent centered tray placement")
         Assert(ResultGui.Hwnd = originalHwnd && ResultView.SourceEdit.Value = "保留的原文"
             && !ResultView.Expanded, "Reopening reuses unified window and collapsed draft")
         SetTranslationSourceExpanded(true)
+        HideResultWindow()
         TestTranslationTransport := TestTranslationHttp()
-        OpenTranslationWindow("new selection")
+        TestSelectedText := "new selection"
+        TranslateText(true)
+        Assert(TestResultPositionCalls = positionCalls + 1, "Selected-text translation still follows mouse positioning setting")
         Assert(ResultGui.Hwnd = originalHwnd && ResultView.SourceEdit.Value = "new selection"
             && !ResultView.Expanded && IsObject(ActiveTranslationRequest), "Selected text replaces source and translates with source collapsed")
         HideResultWindow()
@@ -1586,12 +1626,42 @@ TestUnifiedTranslationWindow()
     finally
     {
         CancelTranslationRequest()
+        ShowResultAtMouse := savedPosition
+        TestSelectedText := savedSelection
         SetTranslationService(savedService)
         ResultView.SourceList.Choose(1)
         ResultView.TargetList.Choose(1)
         ResultView.ServiceList.Choose(GetTranslationServiceIndex(savedService))
     }
 }
+
+TestTranslationEmptyLayout()
+{
+    global ResultGui, ResultView, ResultEdit, ResultPinButton, ResultCloseButton
+    ResultView.SourceEdit.Value := RepeatText("Only source text is visible.`n", 100)
+    FitTranslationWindow()
+    ResultGui.GetClientPos(, , , &height)
+    ResultView.SourceEdit.GetPos(, &sourceY, , &sourceHeight)
+    Assert(height = 348 && sourceHeight = ResultView.SourceMaxHeight,
+        "Source-only window grows to its content height limit")
+    ResultPinButton.GetPos(, &footerY)
+    Assert(footerY = sourceY + sourceHeight + 10 && !ResultEdit.Visible,
+        "Source-only layout places footer immediately below original text")
+    SetTranslationSourceExpanded(false)
+    ResultGui.GetClientPos(, , , &height)
+    Assert(height = 118 && !ResultEdit.Visible && ResultPinButton.Visible && ResultCloseButton.Visible,
+        "Collapsing an empty result leaves a compact window with pin and close actions")
+    ClearTranslationSource()
+    ResultGui.GetClientPos(, , , &height)
+    Assert(height = 192 && ResultView.SourceEdit.Visible && !ResultEdit.Visible,
+        "Clearing restores the compact source editor")
+    HideResultWindow()
+    TranslateFromTray()
+    Assert(!ResultEdit.Visible && !ResultView.ResultLabel.Visible, "Reopening blank window keeps result hidden")
+    ResultView.SourceEdit.Value := "initial original"
+    FitTranslationWindow()
+}
+
 
 TestTranslationAutoHeight()
 {
@@ -1640,6 +1710,118 @@ TestTranslationAutoHeight()
     ResultGui.GetClientPos(, , , &height)
     Assert(height = shortHeight, "Deleting content returns window to minimum height")
 }
+
+TestSettingsOpening()
+{
+    global SettingsDialog, TestSettingsShows
+    OnMessage(0x0018, ObserveSettingsShow)
+    try
+    {
+        for page in [1, 2, 3]
+        {
+            TestSettingsShows := []
+            ShowSettings(page)
+            try
+            {
+                Assert(TestSettingsShows.Length = 1, "Settings opens with one visibility transition")
+                firstShow := TestSettingsShows[1]
+                Assert(firstShow.Ready, "Settings layout and appearance finish before the first visible frame")
+                SettingsDialog.Gui.GetClientPos(, , &width, &height)
+                Assert(firstShow.Width = width && firstShow.Height = height,
+                    "Settings has its final page size before becoming visible")
+            }
+            finally CloseSettings(SettingsDialog)
+        }
+    }
+    finally OnMessage(0x0018, ObserveSettingsShow, 0)
+}
+
+
+ObserveSettingsShow(wParam, lParam, message, hwnd)
+{
+    global SettingsDialog, TestSettingsShows
+    if !wParam || !IsObject(SettingsDialog) || hwnd != SettingsDialog.Gui.Hwnd
+        return
+    SettingsDialog.Gui.GetClientPos(, , &width, &height)
+    TestSettingsShows.Push({Ready: !SettingsDialog.Initializing, Width: width, Height: height})
+}
+
+
+TestTranslationWindowActivation()
+{
+    global ResultGui, ResultView, ResultEdit, ResultPinned, TranslationBusy, TestTranslationTransport
+    other := Gui(, "Translation focus test")
+    popup := Gui("+Owner" . ResultGui.Hwnd, "Translation owned popup test")
+    OnMessage(0x0006, HandleWindowActivation)
+    try
+    {
+        Assert(!(WinGetExStyle("ahk_id " . ResultGui.Hwnd) & 0x80),
+            "Translation keeps a normal title bar and close button")
+        ResultView.SourceEdit.Value := "retained source draft"
+        ResultEdit.Value := "retained translation"
+        OpenTranslationWindow()
+        WinWaitActive("ahk_id " . ResultGui.Hwnd, , 2)
+        CloseInactiveResultWindow(ResultGui.Hwnd)
+        Assert(DllCall("IsWindowVisible", "Ptr", ResultGui.Hwnd), "Active translation remains visible")
+
+        ToggleResultPinned()
+        other.Show("w200 h80")
+        WinWaitActive("ahk_id " . other.Hwnd, , 2)
+        Critical "Off"
+        Sleep(40)
+        Critical
+        Assert(DllCall("IsWindowVisible", "Ptr", ResultGui.Hwnd), "Pinned translation survives real focus loss")
+        ToggleResultPinned()
+        CloseInactiveResultWindow(ResultGui.Hwnd + 1)
+        Assert(DllCall("IsWindowVisible", "Ptr", ResultGui.Hwnd), "Stale focus callbacks leave the window alone")
+
+        OpenTranslationWindow()
+        popup.Show("w200 h80")
+        WinWaitActive("ahk_id " . popup.Hwnd, , 2)
+        Critical "Off"
+        Sleep(40)
+        Critical
+        Assert(DllCall("IsWindowVisible", "Ptr", ResultGui.Hwnd), "Owned popup does not dismiss translation")
+        popup.Hide()
+
+        OpenTranslationWindow()
+        other.Show()
+        WinWaitActive("ahk_id " . other.Hwnd, , 2)
+        Critical "Off"
+        Sleep(40)
+        Critical
+        Assert(!DllCall("IsWindowVisible", "Ptr", ResultGui.Hwnd), "Unpinned translation hides after real focus loss")
+        Assert(ResultView.SourceEdit.Value = "retained source draft" && ResultEdit.Value = "retained translation",
+            "Focus loss preserves source draft and completed translation")
+        OpenTranslationWindow()
+        Assert(ResultView.SourceEdit.Value = "retained source draft" && ResultEdit.Value = "retained translation",
+            "Reopening restores both text panes")
+
+        TestTranslationTransport := TestTranslationHttp()
+        RetranslateFromWindow()
+        other.Show()
+        WinWaitActive("ahk_id " . other.Hwnd, , 2)
+        Critical "Off"
+        Sleep(40)
+        Critical
+        Assert(!TranslationBusy && TestTranslationTransport.Aborts = 1
+            && !DllCall("IsWindowVisible", "Ptr", ResultGui.Hwnd),
+            "Focus loss cancels pending translation so callbacks cannot reopen it")
+    }
+    finally
+    {
+        OnMessage(0x0006, HandleWindowActivation, 0)
+        SetTimer(FitTranslationWindow, 0)
+        CancelTranslationRequest()
+        if ResultPinned
+            ToggleResultPinned()
+        popup.Destroy()
+        other.Destroy()
+        ResultView.SourceEdit.Value := "initial original"
+        ResultEdit.Value := ""
+    }
+}
+
 
 TestAppearanceSwitching()
 {
@@ -1781,6 +1963,14 @@ TestTranslationMaximizedLayout()
         ResultView.SourceEdit.GetPos(, , , &sourceHeight)
         ResultEdit.GetPos(, , , &resultHeight)
         Assert(Abs(sourceHeight - resultHeight) <= 1, "Expanding maximized source redistributes height")
+        ClearTranslationSource()
+        ResultView.SourceEdit.GetPos(, &sourceY, , &sourceHeight)
+        Assert(!ResultEdit.Visible && !ResultView.ResultLabel.Visible
+            && sourceY + sourceHeight = height - 46,
+            "Clearing maximized window hides result and lets source fill the content area")
+        ResultView.SourceEdit.Value := "short source"
+        ResultEdit.Value := "short result"
+        FitTranslationWindow()
     }
     finally
     {
@@ -1801,6 +1991,9 @@ TestTranslationActionAndSwap()
     TestTranslationTransport := TestTranslationHttp()
     try
     {
+        ClearTranslationSource()
+        ResultView.SourceEdit.Value := "hello world"
+        Assert(!ResultEdit.Visible, "Original input alone keeps result hidden before submission")
         Assert(ControlGetStyle(ResultEdit) & 0x800, "Translation is read-only before submitting")
         Assert(!(ControlGetStyle(ResultView.SourceEdit) & 0x800), "Original remains editable")
         SwapTranslationLanguages()
@@ -1811,6 +2004,9 @@ TestTranslationActionAndSwap()
         Assert(ResultView.TranslateButton.Enabled && ResultView.TranslateButton.Text = "取消翻译",
             "Pending translation replaces action with cancel button")
         Assert(ControlGetStyle(ResultEdit) & 0x800, "Pending translation stays read-only")
+        Assert(ResultEdit.Visible && ResultView.ResultLabel.Visible && ResultCopyButton.Visible
+            && ResultSpeakButton.Visible && !ResultCopyButton.Enabled && !ResultSpeakButton.Enabled,
+            "Submitting reveals result area and disables unfinished result actions")
         if ResultIconButtons.Count
             AssertInputIcon({Gui: ResultGui, IconButtons: ResultIconButtons}, ResultView.TranslateButton,
                 0xE71A, "取消翻译")
@@ -1825,6 +2021,20 @@ TestTranslationActionAndSwap()
         result := ResultEdit.Value
         SendMessage(0x0102, Ord("x"), 1, , "ahk_id " . ResultEdit.Hwnd)
         Assert(ResultEdit.Value = result, "Character input cannot modify translation")
+
+        ResultEdit.Value := RepeatText("A long previous translation.`n", 50)
+        FitTranslationWindow()
+        ResultEdit.GetPos(, , , &previousResultHeight)
+        ResultGui.GetClientPos(, , , &previousWindowHeight)
+        TestTranslationTransport := TestTranslationHttp()
+        RetranslateFromWindow()
+        ResultEdit.GetPos(, , , &pendingResultHeight)
+        ResultGui.GetClientPos(, , , &pendingWindowHeight)
+        Assert(ResultEdit.Visible && pendingResultHeight = previousResultHeight
+            && pendingWindowHeight = previousWindowHeight,
+            "Retranslating keeps the previous result area and window height steady")
+        TestTranslationTransport.Completed := true
+        CheckTranslationRequest()
 
         ResultView.SourceList.Choose(1)
         ResultView.TargetList.Choose(2)
@@ -1853,6 +2063,8 @@ TestTranslationActionAndSwap()
         ClearTranslationSource()
         Assert(!TranslationBusy && ResultView.TranslateButton.Text = "翻译", "Clear restores translate action")
         Assert(ControlGetStyle(ResultEdit) & 0x800, "Clear retains read-only result")
+        Assert(!ResultEdit.Visible && !ResultView.ResultLabel.Visible && !ResultCopyButton.Visible
+            && !ResultSpeakButton.Visible, "Clear hides result and its actions again")
 
         ResultView.SourceEdit.Value := "你好世界"
         ResultView.SourceList.Choose(1)
@@ -1971,10 +2183,6 @@ TestFailuresAndCancellation()
     Assert(MenuItemState(A_TrayMenu, "停止朗读") & 3, "Tray stop callback disables item")
 }
 
-TranslateFromTray(*)
-{
-}
-
 QuoteCommandArgument(value)
 {
     return Chr(34) . value . Chr(34)
@@ -2031,6 +2239,8 @@ CancelActiveOnlineOperations()
 
 PositionResultWindowAtMouse()
 {
+    global TestResultPositionCalls
+    TestResultPositionCalls += 1
 }
 
 MoveWindowPhysical(*)

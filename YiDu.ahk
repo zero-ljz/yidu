@@ -2016,7 +2016,17 @@ HandleWindowBackgroundDrag(wParam, lParam, message, hwnd)
 
 HandleWindowActivation(wParam, lParam, message, hwnd)
 {
-    global ActiveInputDialog
+    global ActiveInputDialog, ResultGui, ResultPinned
+
+    if (wParam & 0xFFFF) != 0
+        return
+
+    if IsObject(ResultGui) && hwnd = ResultGui.Hwnd
+    {
+        if !ResultPinned
+            SetTimer(CloseInactiveResultWindow.Bind(hwnd), -1)
+        return
+    }
 
     if !IsObject(ActiveInputDialog)
         return
@@ -2024,7 +2034,7 @@ HandleWindowActivation(wParam, lParam, message, hwnd)
     if hwnd != ActiveInputDialog.Gui.Hwnd
         return
 
-    if (wParam & 0xFFFF) != 0 || ActiveInputDialog.State.Pinned
+    if ActiveInputDialog.State.Pinned
         return
 
     SetTimer(CloseInactiveInputWindow.Bind(hwnd), -1)
@@ -2055,6 +2065,24 @@ CloseInactiveInputWindow(hwnd)
 
     if !WinActive("ahk_id " . hwnd)
         CloseTextInput(ActiveInputDialog.Gui, true)
+}
+
+
+CloseInactiveResultWindow(hwnd)
+{
+    global ResultGui, ResultPinned
+
+    if !IsObject(ResultGui) || ResultGui.Hwnd != hwnd || ResultPinned
+        return
+
+    activeHwnd := WinExist("A")
+    if activeHwnd = hwnd
+        return
+    ; An owned popup, such as a selector list, is still part of this window.
+    if activeHwnd && DllCall("user32\GetAncestor", "Ptr", activeHwnd, "UInt", 3, "Ptr") = hwnd
+        return
+
+    HideResultWindow()
 }
 
 
@@ -2921,7 +2949,7 @@ ShowTranslationResult(translatedText, pending := false)
 {
     global ResultGui, ResultEdit, ResultPinButton, ResultSpeakButton
     global ResultPauseButton, ResultCopyButton, ResultCloseButton
-    global ShowResultAtMouse
+    global ShowResultAtMouse, ResultView
 
     isNewWindow := !IsObject(ResultGui)
     wasVisible := !isNewWindow
@@ -2930,6 +2958,14 @@ ShowTranslationResult(translatedText, pending := false)
     if isNewWindow
         CreateResultWindow()
 
+    ; Keep the previous result area steady while a replacement request is running.
+    if pending && ResultEdit.Value != "" && !ResultView.PendingResultHeight
+    {
+        ResultEdit.GetPos(, , , &resultHeight)
+        ResultView.PendingResultHeight := Min(resultHeight, ResultView.ResultMaxHeight)
+    }
+    else if !pending
+        ResultView.PendingResultHeight := 0
     ResultEdit.Value := translatedText
     ResultEdit.Opt("+ReadOnly")
     ResultSpeakButton.Enabled := !pending
@@ -3113,7 +3149,7 @@ CreateResultWindow()
 
     palette := GetAppearancePalette()
     ResultGui := Gui(
-        "+Resize +MinSize520x290",
+        "+Resize +MinSize520x192",
         "译读 · 翻译"
     )
     ResultGui.MarginX := 10
@@ -3141,6 +3177,7 @@ CreateResultWindow()
         SourceMaxHeight: 220,
         ResultMinHeight: 64,
         ResultMaxHeight: 360,
+        PendingResultHeight: 0,
         SourceList: ResultGui.AddDropDownList("x10 y10 w100 +0x210", sourceLabels),
         SwapButton: ResultGui.AddButton("x122 y10 w28 h26", "交换语言"),
         TargetList: ResultGui.AddDropDownList("x162 y10 w112 +0x210", targetLabels),
@@ -3148,12 +3185,12 @@ CreateResultWindow()
         ServiceList: ResultGui.AddDropDownList("x486 y10 w64 +0x210", serviceLabels),
         SourceHeading: ResultGui.AddText("x10 y46 w40 h26 +0x200", "原文"),
         ToggleButton: ResultGui.AddButton("x58 y46 w72 h26", "收起原文"),
-        PasteButton: ResultGui.AddButton("x302 y46 w72 h26", "粘贴"),
-        ClearButton: ResultGui.AddButton("x382 y46 w72 h26", "清空"),
+        ClearButton: ResultGui.AddButton("x302 y46 w72 h26", "清空"),
+        PasteButton: ResultGui.AddButton("x382 y46 w72 h26", "粘贴"),
         TranslateButton: ResultGui.AddButton("x462 y46 w88 h26 Default", "翻译"),
         SourceEdit: ResultGui.AddEdit("x10 y82 w540 h64 +Multi +WantReturn Background"
             . palette.FieldBackground . " c" . palette.Text),
-        ResultLabel: ResultGui.AddText("x10 y154 w200 h22 +0x200", "译文")
+        ResultLabel: ResultGui.AddText("x10 y154 w200 h22 +0x200 Hidden", "译文")
     }
     ResultView.SourceList.Choose(1)
     ResultView.TargetList.Choose(1)
@@ -3161,15 +3198,15 @@ CreateResultWindow()
     ResultView.TargetTooltip := CreateControlTooltip(ResultGui, ResultView.TargetList, "目标语言")
     ResultView.ServiceList.Choose(GetTranslationServiceIndex(CONFIG.TranslationService))
     ResultEdit := ResultGui.AddEdit(
-        "x10 y180 w540 h64 +Multi +WantReturn +ReadOnly Background"
+        "x10 y180 w540 h64 +Multi +WantReturn +ReadOnly Hidden Background"
             . palette.FieldBackground . " c" . palette.Text
     )
     useIcons := HasInputIconFont()
     ResultIconButtons := Map()
     ResultPinButton := ResultGui.AddButton("xm y+10 w" . (useIcons ? 28 : 72) . " h26", "钉住")
-    ResultPauseButton := ResultGui.AddButton("x" . (useIcons ? 262 : 114) . " yp w" . (useIcons ? 28 : 64) . " h26", "暂停")
-    ResultSpeakButton := ResultGui.AddButton("x+8 yp w" . (useIcons ? 28 : 64) . " h26", "朗读")
-    ResultCopyButton := ResultGui.AddButton("x+8 yp w" . (useIcons ? 28 : 72) . " h26", "复制结果")
+    ResultPauseButton := ResultGui.AddButton("x" . (useIcons ? 262 : 114) . " yp w" . (useIcons ? 28 : 64) . " h26 Hidden", "暂停")
+    ResultSpeakButton := ResultGui.AddButton("x+8 yp w" . (useIcons ? 28 : 64) . " h26 Hidden", "朗读")
+    ResultCopyButton := ResultGui.AddButton("x+8 yp w" . (useIcons ? 28 : 72) . " h26 Hidden", "复制结果")
     ResultCloseButton := ResultGui.AddButton("x+8 yp w" . (useIcons ? 28 : 52) . " h26", "关闭")
     ResultSpeakButton.Enabled := false
     ResultCopyButton.Enabled := false
@@ -3178,7 +3215,7 @@ CreateResultWindow()
     if useIcons
     {
         InitializeIconButton(ResultGui, ResultIconButtons, ResultView.SwapButton, 0xE8AB)
-        for control in [ResultView.ToggleButton, ResultView.PasteButton, ResultView.ClearButton, ResultView.TranslateButton]
+        for control in [ResultView.ToggleButton, ResultView.ClearButton, ResultView.PasteButton, ResultView.TranslateButton]
             control.Move(, , 28)
         InitializeIconButton(ResultGui, ResultIconButtons, ResultView.ToggleButton, 0xE70E)
         InitializeIconButton(ResultGui, ResultIconButtons, ResultView.PasteButton, 0xE77F)
@@ -3260,7 +3297,7 @@ SwapTranslationLanguages(*)
 
 OpenTranslationWindow(sourceText := "")
 {
-    global ResultGui, ResultView, ResultEdit, CONFIG, ShowResultAtMouse
+    global ResultGui, ResultView, ResultEdit, CONFIG, ShowResultAtMouse, ResultPinned
 
     isNewWindow := !IsObject(ResultGui)
     if isNewWindow
@@ -3279,16 +3316,11 @@ OpenTranslationWindow(sourceText := "")
     ResultView.ServiceList.Choose(GetTranslationServiceIndex(CONFIG.TranslationService))
     wasVisible := DllCall("IsWindowVisible", "Ptr", ResultGui.Hwnd)
     FitTranslationWindow()
-    if isNewWindow
-        ResultGui.Show()
-    else
-    {
-        if DllCall("user32\IsIconic", "Ptr", ResultGui.Hwnd)
-            WinRestore("ahk_id " . ResultGui.Hwnd)
-        ResultGui.Show()
-    }
+    if DllCall("user32\IsIconic", "Ptr", ResultGui.Hwnd)
+        WinRestore("ahk_id " . ResultGui.Hwnd)
+    ResultGui.Show(sourceText = "" && !ResultPinned ? "Center" : "")
     ApplyWindowTransparency(ResultGui)
-    if !wasVisible && ShowResultAtMouse
+    if sourceText != "" && !wasVisible && ShowResultAtMouse
         PositionResultWindowAtMouse()
     WinActivate("ahk_id " . ResultGui.Hwnd)
     if ResultView.Expanded
@@ -3426,14 +3458,25 @@ MeasureTranslationEditHeight(edit, width, minimum, maximum)
 }
 
 
+UpdateTranslationResultVisibility()
+{
+    global ResultView, ResultEdit, ResultPauseButton, ResultSpeakButton, ResultCopyButton
+    visible := ResultEdit.Value != ""
+    for control in [ResultView.ResultLabel, ResultEdit, ResultPauseButton, ResultSpeakButton, ResultCopyButton]
+        if control.Visible != visible
+            control.Visible := visible
+    return visible
+}
+
+
 GetTranslationPaneHeights(width)
 {
     global ResultView, ResultEdit
     return {
         Source: MeasureTranslationEditHeight(ResultView.SourceEdit, width - 20,
             ResultView.SourceMinHeight, ResultView.SourceMaxHeight),
-        Result: MeasureTranslationEditHeight(ResultEdit, width - 20,
-            ResultView.ResultMinHeight, ResultView.ResultMaxHeight)
+        Result: Max(ResultView.PendingResultHeight, MeasureTranslationEditHeight(ResultEdit, width - 20,
+            ResultView.ResultMinHeight, ResultView.ResultMaxHeight))
     }
 }
 
@@ -3448,6 +3491,7 @@ FitTranslationWindow(*)
     ResultView.AutoSizing := true
     try
     {
+        hasResult := UpdateTranslationResultVisibility()
         ResultGui.GetClientPos(, , &width, &height)
         if DllCall("user32\IsZoomed", "Ptr", ResultGui.Hwnd)
         {
@@ -3457,11 +3501,20 @@ FitTranslationWindow(*)
         }
         width := width >= 520 ? width : 560
         paneHeights := GetTranslationPaneHeights(width)
-        minimum := 154 + ResultView.ResultMinHeight
-            + (ResultView.Expanded ? ResultView.SourceMinHeight + 8 : 0)
-        maximum := 154 + ResultView.ResultMaxHeight
-            + (ResultView.Expanded ? ResultView.SourceMaxHeight + 8 : 0)
-        desired := 154 + paneHeights.Result + (ResultView.Expanded ? paneHeights.Source + 8 : 0)
+        if hasResult
+        {
+            minimum := 154 + ResultView.ResultMinHeight
+                + (ResultView.Expanded ? ResultView.SourceMinHeight + 8 : 0)
+            maximum := 154 + ResultView.ResultMaxHeight
+                + (ResultView.Expanded ? ResultView.SourceMaxHeight + 8 : 0)
+            desired := 154 + paneHeights.Result + (ResultView.Expanded ? paneHeights.Source + 8 : 0)
+        }
+        else
+        {
+            minimum := ResultView.Expanded ? 128 + ResultView.SourceMinHeight : 118
+            maximum := ResultView.Expanded ? 128 + ResultView.SourceMaxHeight : 118
+            desired := ResultView.Expanded ? 128 + paneHeights.Source : 118
+        }
 
         ; Limit the entire window to the current monitor's usable height as well.
         monitor := DllCall("user32\MonitorFromWindow", "Ptr", ResultGui.Hwnd, "UInt", 2, "Ptr")
@@ -3507,6 +3560,8 @@ UpdateTranslationButton(busy)
     global ResultView
     if !IsObject(ResultView)
         return
+    if !busy
+        ResultView.PendingResultHeight := 0
     control := ResultView.TranslateButton
     control.Enabled := true
     control.Text := busy ? "取消翻译" : "翻译"
@@ -5004,7 +5059,7 @@ ApplyDropDownTheme(dropDownControl)
 }
 
 
-ApplyAppearanceToExistingWindow(guiObject)
+ApplyAppearanceToExistingWindow(guiObject, redraw := true)
 {
     palette := GetAppearancePalette()
     controls := []
@@ -5035,7 +5090,8 @@ ApplyAppearanceToExistingWindow(guiObject)
 
     ApplyWindowTheme(guiObject, controls*)
     ApplyWindowTransparency(guiObject)
-    RedrawGuiWindow(guiObject)
+    if redraw
+        RedrawGuiWindow(guiObject)
 }
 
 
@@ -5091,7 +5147,7 @@ ResizeResultWindow(
     ResultView.ServiceList.Move(width - 10 - selectorWidth, 10)
     ResultView.ServiceLabel.Move(width - 10 - selectorWidth - 4 - labelWidth, 10)
     nextX := width - 10
-    for control in [ResultView.TranslateButton, ResultView.ClearButton, ResultView.PasteButton]
+    for control in [ResultView.TranslateButton, ResultView.PasteButton, ResultView.ClearButton]
     {
         control.GetPos(, , &controlWidth)
         nextX -= controlWidth
@@ -5099,22 +5155,27 @@ ResizeResultWindow(
         nextX -= 8
     }
     maximized := minMax = 1
+    hasResult := UpdateTranslationResultVisibility()
     if maximized
-        sourceHeight := Max(ResultView.SourceMinHeight, Floor((height - 162) / 2))
+        sourceHeight := Max(ResultView.SourceMinHeight,
+            hasResult ? Floor((height - 162) / 2) : height - 128)
     else
     {
         paneHeights := GetTranslationPaneHeights(width)
         sourceHeight := Min(paneHeights.Source,
-            Max(ResultView.SourceMinHeight, height - 162 - ResultView.ResultMinHeight))
+            Max(ResultView.SourceMinHeight, hasResult ? height - 162 - ResultView.ResultMinHeight : height - 128))
     }
     ResultView.SourceEdit.Move(10, 82, width - 20, sourceHeight)
     labelY := ResultView.Expanded ? 82 + sourceHeight + 8 : 82
-    ResultView.ResultLabel.Move(10, labelY)
-    resultY := labelY + 26
-    resultHeight := Max(ResultView.ResultMinHeight, height - 46 - resultY)
-    if !maximized
-        resultHeight := Min(ResultView.ResultMaxHeight, resultHeight)
-    resultEdit.Move(10, resultY, width - 20, resultHeight)
+    if hasResult
+    {
+        ResultView.ResultLabel.Move(10, labelY)
+        resultY := labelY + 26
+        resultHeight := Max(ResultView.ResultMinHeight, height - 46 - resultY)
+        if !maximized
+            resultHeight := Min(ResultView.ResultMaxHeight, resultHeight)
+        resultEdit.Move(10, resultY, width - 20, resultHeight)
+    }
     pinButton.Move(10, height - 36)
     nextX := width - 10
     for control in [closeButton, copyButton, speakButton, pauseButton]

@@ -44,6 +44,7 @@ try {
         'SetTimer(InspectTestInput.Bind(selectorType), -1)' + "`n    " + 'WinWaitClose("ahk_id " . inputGui.Hwnd)')
     $inputEvents = Get-SourceBlock "`nToggleInputPinned(" "`nGetTranslationTargetLanguage("
     $inputEvents = $inputEvents.Replace('TrayTip(', 'TestTrayTip(')
+    $translationEntry = Get-SourceBlock "`nTranslateFromTray(*)`n" "`nSpeakFromHotkey(*)`n"
     $speakText = Get-SourceBlock "`nSpeakText(readSelection)`n" "`nGetSelectedText()`n"
     $speakText = $speakText.Replace('TrayTip(', 'TestTrayTip(')
     $translationStart = Get-SourceBlock "`nStartTranslationRequest(" "`nStartNextTranslationChunk("
@@ -81,7 +82,7 @@ try {
         $settings + $menuGlobals + $globals + $tests + $speech + $worker + $tray +
         $configFunctions + $voiceFunctions + $format + $autostartAction +
         $resultPositionAction + $privacyActions + $startup + $inputFunctions +
-        $inputEvents + $speakText + $translationLanguages + $translationRequests + $urlEncoding + $translationStart + $translationEvents + $hideResult +
+        $inputEvents + $translationEntry + $speakText + $translationLanguages + $translationRequests + $urlEncoding + $translationStart + $translationEvents + $hideResult +
         $resultCreate + $resultDisplay + $resultCommands + $resultResize +
         $windowRect + $appearance + $appearanceUpdate + $dropDownTheme + $redraw, [Text.UTF8Encoding]::new($true))
 

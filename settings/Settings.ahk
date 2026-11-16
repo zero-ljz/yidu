@@ -83,7 +83,7 @@ ShowSettings(page := 1, *)
     saveButton := window.AddButton("x274 yp w72 h26 Default", "保存")
     cancelButton := window.AddButton("x354 yp w56 h26", "取消")
     dialog := {
-        Gui: window, Page: page, HeaderButtons: headers, PageControls: pages, ThemeList: themeList, Transparency: transparency,
+        Gui: window, Initializing: true, Page: page, HeaderButtons: headers, PageControls: pages, ThemeList: themeList, Transparency: transparency,
         ResultPosition: resultPosition, Autostart: autostart, Admin: admin,
         ServiceList: serviceList, VoiceList: voiceList, SpeedList: speedList, Consent: consent,
         TranslationButton: translationButton, SpeechButton: speechButton,
@@ -103,10 +103,6 @@ ShowSettings(page := 1, *)
     cancelButton.OnEvent("Click", CloseSettings.Bind(dialog))
     window.OnEvent("Close", CloseSettings.Bind(dialog))
     window.OnEvent("Escape", CloseSettings.Bind(dialog))
-    ApplyWindowTheme(window, transparency, resultPosition, autostart, privacyLink,
-        translationButton, speechButton, restoreButton, saveButton, cancelButton)
-    if IsObject(admin)
-        ApplyWindowTheme(window, admin)
     SettingsDialog := dialog
     ; AddButton normalizes the button type, so apply BS_OWNERDRAW after creation.
     ; Keep the native button for accessible captions, focus and keyboard activation.
@@ -119,8 +115,9 @@ ShowSettings(page := 1, *)
         OnMessage(0x0006, HandleSettingsActivation)
         OnMessage(0x0100, HandleSettingsPageKeyDown)
         SelectSettingsPage(dialog, page)
-        LayoutSettings(dialog, true)
         ApplySettingsAppearance(dialog)
+        dialog.Initializing := false
+        LayoutSettings(dialog, true)
     }
     catch
     {
@@ -164,7 +161,8 @@ SelectSettingsPage(dialog, page, *)
     for index, button in dialog.HeaderButtons
         button.SetFont("w" . (index = page ? 600 : 400) . " c" . palette.Text)
     LayoutSettings(dialog)
-    RedrawGuiWindow(dialog.Gui)
+    if !dialog.Initializing
+        RedrawGuiWindow(dialog.Gui)
 }
 
 
@@ -279,13 +277,14 @@ LayoutSettings(dialog, activate := false)
     dialog.RestoreButton.Move(margin, actionY)
     dialog.SaveButton.Move(dialog.Width - margin - cancelWidth - gap - saveWidth, actionY)
     dialog.CancelButton.Move(dialog.Width - margin - cancelWidth, actionY)
-    dialog.Gui.Show("w" . dialog.Width . " h" . (actionY + buttonHeight + margin) . (activate ? "" : " NA"))
+    dialog.Gui.Show("w" . dialog.Width . " h" . (actionY + buttonHeight + margin)
+        . (dialog.Initializing ? " Hide" : (activate ? "" : " NA")))
 }
 
 
 ApplySettingsAppearance(dialog)
 {
-    ApplyAppearanceToExistingWindow(dialog.Gui)
+    ApplyAppearanceToExistingWindow(dialog.Gui, false)
     for control in [dialog.ThemeList, dialog.ServiceList, dialog.VoiceList, dialog.SpeedList]
     {
         ApplyDropDownTheme(control)
