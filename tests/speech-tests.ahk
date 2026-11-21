@@ -1,5 +1,5 @@
-global ResultSpeakButton := {Text: ""}
-global ResultPauseButton := {Text: "", Enabled: false}
+﻿global ResultSpeakButton := {Text: ""}
+global ResultStopButton := {Text: "停止", Enabled: false}
 global ResultEdit := 0
 global ResultPinButton := 0
 global ResultCopyButton := 0
@@ -517,6 +517,11 @@ InspectTestInput(mode)
     Critical
     if !IsObject(ActiveInputDialog)
         return
+    if TestVoiceScenario = "translation"
+    {
+        InspectTranslationAlongsideSpeech()
+        return
+    }
     if TestVoiceScenario != ""
     {
         InspectVoicePlaybackInput()
@@ -730,7 +735,7 @@ AssertVoiceInputControls(dialog, paused := false, busy := true)
     Assert(dialog.CancelButton.Text = (busy ? "停止" : "关闭"), "Speech input secondary label")
     if dialog.IconButtons.Count
     {
-        AssertInputIcon(dialog, dialog.SubmitButton, busy ? (paused ? 0xE768 : 0xE769) : 0xE995,
+        AssertInputIcon(dialog, dialog.SubmitButton, busy ? (paused ? 0xE768 : 0xE769) : 0xE767,
             busy ? (paused ? "继续" : "暂停") : "朗读")
         AssertInputIcon(dialog, dialog.CancelButton, busy ? 0xE71A : 0xE711, busy ? "停止" : "关闭")
     }
@@ -1078,12 +1083,12 @@ IsTimeoutError(*)
     return false
 }
 
-ShowTranslationResult(text, pending := false)
+ShowTranslationResult(text, pending := false, editable := true)
 {
     global TestTranslationResults, ResultGui, ResultEdit, ResultSpeakButton, ResultCopyButton
     TestTranslationResults.Push(text)
     if ResultGui is Gui
-        RenderTranslationResult(text, pending)
+        RenderTranslationResult(text, pending, editable)
     else
         ResultGui.Hidden := false
 }
@@ -1114,7 +1119,7 @@ ShowTranslationError(message)
     global TestTranslationErrors, ResultGui
     TestTranslationErrors.Push(message)
     if ResultGui is Gui
-        RenderTranslationResult("翻译失败：`r`n" . message)
+        RenderTranslationResult("翻译失败：`r`n" . message, false, false)
     else
         ResultGui.Hidden := false
 }
@@ -1240,7 +1245,7 @@ TestPlaybackQueue()
     Assert(TestPlaybackCount = 3 && !SpeechSynthesisPending, "Resume after slow synthesis")
     FinishTestPlayback()
     Assert(!SpeechBusy && !IsObject(SpeechSession), "Final playback finishes session")
-    Assert(ResultSpeakButton.Text = "朗读", "Button reset")
+    Assert(ResultSpeakButton.Text = "朗读译文", "Button reset")
     Assert(MenuItemState(A_TrayMenu, "停止朗读") & 3, "Stop item disabled after completion")
     StartTestSpeech(20)
     Assert(SpeechSession.Rate = "+100%", "Next session uses changed speed")
@@ -1249,19 +1254,41 @@ TestPlaybackQueue()
 
 AssertSpeechControls(paused := false, busy := true)
 {
-    global ResultPauseButton, ResultSpeakButton, SpeechBusy, SpeechSession
-    global ResultGui, ResultIconButtons
+    global ResultStopButton, ResultSpeakButton, SpeechBusy, SpeechSession
+    global ResultGui, ResultIconButtons, ResultView
     pauseLabel := paused ? "继续朗读" : "暂停朗读"
     Assert(SpeechBusy = busy, "Speech busy state")
     Assert(!!(MenuItemState(A_TrayMenu, pauseLabel) & 3) = !busy, "Pause menu availability")
     Assert(!!(MenuItemState(A_TrayMenu, "停止朗读") & 3) = !busy, "Stop menu availability")
-    Assert(ResultPauseButton.Text = (paused ? "继续" : "暂停") && ResultPauseButton.Enabled = busy, "Result pause state")
-    Assert(ResultSpeakButton.Text = (busy ? "停止" : "朗读"), "Result stop state")
+    readingResult := busy && SpeechSession.Origin = "translation"
+    playbackText := paused ? "继续" : "暂停"
+    playbackIcon := paused ? 0xE768 : 0xE769
+    Assert(ResultSpeakButton.Text = (readingResult ? playbackText : "朗读译文"), "Result play/pause state")
+    if IsObject(ResultView)
+    {
+        readingSource := busy && SpeechSession.Origin = "source"
+        Assert(ResultView.SourceSpeakButton.Text = (readingSource ? playbackText : "朗读原文"),
+            "Source play/pause state")
+        Assert(ResultStopButton.Text = "停止" && ResultStopButton.Visible = (readingSource || readingResult)
+            && ResultStopButton.Enabled = (readingSource || readingResult),
+            "Stop appears only while reading a translation pane")
+        if readingSource || readingResult
+        {
+            anchor := readingSource ? ResultView.SourceSpeakButton : ResultSpeakButton
+            anchor.GetPos(&anchorX, &anchorY, &anchorWidth)
+            ResultStopButton.GetPos(&stopX, &stopY)
+            Assert(stopX = anchorX + anchorWidth + 6 && stopY = anchorY,
+                "Stop sits immediately to the right of the active play/pause button")
+        }
+    }
     if ResultIconButtons.Count
     {
         resultDialog := {Gui: ResultGui, IconButtons: ResultIconButtons}
-        AssertInputIcon(resultDialog, ResultSpeakButton, busy ? 0xE71A : 0xE995, busy ? "停止" : "朗读")
-        AssertInputIcon(resultDialog, ResultPauseButton, paused ? 0xE768 : 0xE769, paused ? "继续" : "暂停")
+        AssertInputIcon(resultDialog, ResultSpeakButton, readingResult ? playbackIcon : 0xE767,
+            readingResult ? playbackText : "朗读译文")
+        AssertInputIcon(resultDialog, ResultView.SourceSpeakButton, readingSource ? playbackIcon : 0xE767,
+            readingSource ? playbackText : "朗读原文")
+        AssertInputIcon(resultDialog, ResultStopButton, 0xE71A, "停止")
     }
     if busy
         Assert(SpeechSession.Paused = paused, "Session pause state")
@@ -1396,7 +1423,7 @@ DispatchResultButton(button)
 
 TestResultSpeechControls()
 {
-    global ResultGui, ResultEdit, ResultPinButton, ResultPauseButton, ResultSpeakButton
+    global ResultGui, ResultEdit, ResultPinButton, ResultStopButton, ResultSpeakButton
     global ResultCopyButton, ResultCloseButton, SpeechSession, SpeechMciAlias
     global ResultIconButtons, ResultPinned, ResultView, TestResultPositionCalls
 
@@ -1411,27 +1438,45 @@ TestResultSpeechControls()
         Assert(TestResultPositionCalls = 0, "First tray opening uses the default position instead of the mouse")
         Assert(!ResultCopyButton.Enabled && !ResultSpeakButton.Enabled, "New window has no result actions")
         Assert(!ResultEdit.Visible && !ResultView.ResultLabel.Visible && !ResultCopyButton.Visible
-            && !ResultSpeakButton.Visible && !ResultPauseButton.Visible, "New window hides empty result and related actions")
-        ResultGui.GetClientPos(, , , &emptyHeight)
+            && !ResultSpeakButton.Visible && !ResultStopButton.Visible, "New window hides empty result and related actions")
+        ResultGui.GetClientPos(, , &initialWidth, &emptyHeight)
+        Assert(initialWidth = 480, "New translation window defaults to a compact width")
         Assert(emptyHeight = 192, "New window has no unused result area")
+        Assert(ResultView.SourceSpeakButton.Enabled, "Source speech is available before translating")
+        DispatchResultButton(ResultView.SourceSpeakButton)
+        Assert(SpeechSession.Origin = "source" && SpeechSession.Chunks[1] = "initial original",
+            "Original can be read without a translation")
+        AssertSpeechControls()
+        sourceSession := SpeechSession
+        DispatchResultButton(ResultView.SourceSpeakButton)
+        AssertSpeechControls(true)
+        Assert(SpeechSession = sourceSession, "Original pause preserves the synthesis session")
+        DispatchResultButton(ResultView.SourceSpeakButton)
+        AssertSpeechControls()
+        DispatchResultButton(ResultStopButton)
+        AssertSpeechControls(false, false)
         TestTranslationEmptyLayout()
         TestSettingsOpening()
         TestAppearanceSwitching()
-        FileAppend("PASS: dark/light preview, native title bars, readable checkbox painting and settings rollback`n", "*")
+        TestBorderlessDropDowns()
+        FileAppend("PASS: dark/light preview, borderless dropdown keyboard access, native title bars and settings rollback`n", "*")
         TestTranslationWindowActivation()
         FileAppend("PASS: translation blur hiding, pinning, owned popups and retained drafts; settings ready before showing`n", "*")
-        ResultGui.Show("Hide w560 h480")
+        ResultGui.Show("Hide w480 h480")
         TestUnifiedTranslationWindow()
+        TestTranslationAlongsideSpeech()
+        FileAppend("PASS: tray and selected-text translation alongside pinned speech input, retained text and window reuse`n", "*")
         resultDialog := {Gui: ResultGui, IconButtons: ResultIconButtons}
         for hwnd, button in ResultIconButtons
             tooltipWindows.Push(button.Tooltip.Hwnd)
         if ResultIconButtons.Count
         {
-            Assert(ResultIconButtons.Count = 10, "Translation window initializes all ten icons")
+            Assert(ResultIconButtons.Count = 11, "Translation window initializes all eleven icons")
             AssertInputIcon(resultDialog, ResultView.SwapButton, 0xE8AB, "交换语言")
             AssertInputIcon(resultDialog, ResultView.PasteButton, 0xE77F, "粘贴")
             AssertInputIcon(resultDialog, ResultView.ClearButton, 0xE74D, "清空")
-            AssertInputIcon(resultDialog, ResultView.TranslateButton, 0xE72C, "翻译")
+            AssertInputIcon(resultDialog, ResultView.TranslateButton, 0xF2B7, "翻译")
+            AssertInputIcon(resultDialog, ResultView.SourceSpeakButton, 0xE767, "朗读原文")
             AssertInputIcon(resultDialog, ResultPinButton, 0xE718, "钉住")
             AssertInputIcon(resultDialog, ResultCopyButton, 0xE8C8, "复制结果")
             AssertInputIcon(resultDialog, ResultCloseButton, 0xE711, "关闭")
@@ -1445,20 +1490,18 @@ TestResultSpeechControls()
         }
         ToggleResultPinned()
         Assert(!ResultPinned, "Result pin disabled")
-        for size in [{Width: 520, Height: 290}, {Width: 800, Height: 600}]
+        for size in [{Width: 440, Height: 290}, {Width: 480, Height: 290}, {Width: 800, Height: 600}]
         {
-            ResizeResultWindow(ResultEdit, ResultPinButton, ResultPauseButton, ResultSpeakButton,
+            ResizeResultWindow(ResultEdit, ResultPinButton, ResultSpeakButton,
                 ResultCopyButton, ResultCloseButton, ResultGui, 0, size.Width, size.Height)
-            AssertInputLayout({Edit: ResultEdit, PinButton: ResultPinButton,
-                SelectorList: 0, SpeedButton: ResultPauseButton,
-                SubmitButton: ResultSpeakButton, CancelButton: ResultCopyButton}, size.Width, size.Height)
-            ResultCopyButton.GetPos(&copyX, , &copyWidth)
+            AssertTranslationToolbarLayout(size.Width, size.Height)
             ResultCloseButton.GetPos(&closeX, &closeY, &closeWidth, &closeHeight)
-            Assert(closeX >= copyX + copyWidth + 6 && closeX + closeWidth <= size.Width - 10
+            Assert(closeX + closeWidth <= size.Width - 10
                 && closeY + closeHeight <= size.Height - 8, "Result close button fits row")
         }
         AssertSpeechControls(false, false)
-        ResultEdit.Value := "result text"
+        ShowTranslationResult("result text")
+        Assert(!ResultStopButton.Visible, "Completed translation has no stop button before speech starts")
         DispatchResultButton(ResultCopyButton)
         Assert(A_Clipboard = "result text" && ResultCopyButton.Text = "已复制", "Result copy writes clipboard and confirms success")
         if ResultIconButtons.Count
@@ -1473,17 +1516,16 @@ TestResultSpeechControls()
         alias := SpeechMciAlias
         DispatchSpeechMenu("暂停朗读")
         AssertSpeechControls(true)
-        DispatchResultButton(ResultPauseButton)
+        DispatchResultButton(ResultSpeakButton)
         AssertSpeechControls()
         Assert(SpeechMciAlias = alias, "Result resume uses same playback device")
-        DispatchResultButton(ResultPauseButton)
+        DispatchResultButton(ResultSpeakButton)
         AssertSpeechControls(true)
         SetupTrayMenu()
         AssertSpeechControls(true)
         DispatchSpeechMenu("继续朗读")
         AssertSpeechControls()
-        DispatchResultButton(ResultPauseButton)
-        DispatchResultButton(ResultSpeakButton)
+        DispatchResultButton(ResultStopButton)
         AssertSpeechControls(false, false)
         DispatchResultButton(ResultCloseButton)
         Assert(!DllCall("IsWindowVisible", "Ptr", ResultGui.Hwnd), "Result icon close hides window")
@@ -1501,17 +1543,81 @@ TestResultSpeechControls()
         ResultView := 0
         ResultEdit := 0
         ResultPinButton := 0
-        ResultPauseButton := {Text: "暂停", Enabled: false}
-        ResultSpeakButton := {Text: "朗读"}
+        ResultStopButton := {Text: "停止", Enabled: false}
+        ResultSpeakButton := {Text: "朗读译文"}
         ResultCopyButton := 0
         ResultCloseButton := 0
     }
 }
 
+TestBorderlessDropDowns()
+{
+    window := Gui(, "Dropdown behavior test")
+    reference := window.AddButton("x10 y10 w80 h26", "Reference")
+    selector := window.AddDropDownList("x10 y46 w100 +0x210",
+        ["第一项", "An English voice with a longer display name", "最后一项"])
+    selector.Choose(1)
+    try
+    {
+        ApplyDropDownTheme(selector)
+        MatchDropDownHeight(reference, selector)
+        window.Show("Hide w180 h90")
+        SendMessage(0x0100, 0x23, 1, , "ahk_id " . selector.Hwnd) ; End
+        Assert(selector.Value = 3, "Borderless dropdown retains native keyboard selection")
+        SendMessage(0x0100, 0x24, 1, , "ahk_id " . selector.Hwnd) ; Home
+        Assert(selector.Value = 1, "Keyboard can return to the first dropdown option")
+        SendMessage(0x014F, 1, , , "ahk_id " . selector.Hwnd) ; CB_SHOWDROPDOWN
+        Assert(SendMessage(0x0157, , , , "ahk_id " . selector.Hwnd), "Native popup still opens")
+        SendMessage(0x0100, 0x1B, 1, , "ahk_id " . selector.Hwnd) ; Escape
+        Assert(!SendMessage(0x0157, , , , "ahk_id " . selector.Hwnd) && selector.Value = 1,
+            "Escape closes the popup without changing selection")
+        GetPhysicalWindowRect(selector.Hwnd, , , &fieldWidth)
+        Assert(SendMessage(0x015F, , , , "ahk_id " . selector.Hwnd) > fieldWidth,
+            "Popup expands to show long option labels")
+    }
+    finally window.Destroy()
+}
+
+
+AssertTranslationToolbarLayout(width, height)
+{
+    global ResultView, ResultEdit, ResultSpeakButton, ResultCopyButton
+    global ResultPinButton, ResultStopButton, ResultCloseButton
+    ResultEdit.GetPos(, &editY)
+    ResultView.ResultLabel.GetPos(&labelX, &labelY, &labelWidth)
+    previousRight := labelX + labelWidth
+    for control in [ResultSpeakButton, ResultCopyButton]
+    {
+        control.GetPos(&x, &y, &w, &h)
+        Assert(x >= previousRight + 2 && x + w <= width - 10,
+            "Translation heading actions fit at compact widths")
+        Assert(y >= labelY - 2 && y + h <= editY,
+            "Speech and copy actions sit beside translation heading")
+        previousRight := x + w
+    }
+    previousRight := 0
+    for control in [ResultPinButton, ResultCloseButton]
+    {
+        control.GetPos(&x, &y, &w, &h)
+        Assert(x >= previousRight + 6 && x + w <= width - 10 && y + h <= height - 8,
+            "Window actions fit in footer")
+        previousRight := x + w
+    }
+    if ResultStopButton.Visible
+    {
+        ResultStopButton.GetPos(&stopX, &stopY, &stopWidth)
+        ResultView.ToggleButton.GetPos(&toggleX)
+        ResultCopyButton.GetPos(&copyX)
+        Assert(stopX + stopWidth + 6 <= (stopY = 46 ? toggleX : copyX),
+            "Stop fits beside playback without overlapping collapse or copy")
+    }
+}
+
+
 TestUnifiedTranslationWindow()
 {
     global ResultGui, ResultView, ResultEdit, ResultSpeakButton, ResultCopyButton
-    global ResultPinButton, ResultPauseButton, ResultCloseButton
+    global ResultPinButton, ResultStopButton, ResultCloseButton
     global ActiveTranslationRequest, TranslationBusy, TestTranslationTransport, CONFIG
     global TestResultPositionCalls, ShowResultAtMouse, TestSelectedText
     global ResultPinned
@@ -1525,16 +1631,16 @@ TestUnifiedTranslationWindow()
         TestTranslationWidthOnlyResize()
         TestTranslationMaximizedLayout()
         TestTranslationActionAndSwap()
-        for size in [{Width: 520, Height: 290}, {Width: 800, Height: 600}]
+        for size in [{Width: 440, Height: 290}, {Width: 480, Height: 290}, {Width: 800, Height: 600}]
         {
             for expanded in [true, false]
             {
                 ResultView.Expanded := expanded
-                ResizeResultWindow(ResultEdit, ResultPinButton, ResultPauseButton, ResultSpeakButton,
+                ResizeResultWindow(ResultEdit, ResultPinButton, ResultSpeakButton,
                     ResultCopyButton, ResultCloseButton, ResultGui, 0, size.Width, size.Height)
                 previousRight := 0
                 for control in [ResultView.SourceList, ResultView.SwapButton,
-                    ResultView.TargetList, ResultView.ServiceLabel, ResultView.ServiceList]
+                    ResultView.TargetList, ResultView.ServiceList]
                 {
                     control.GetPos(&x, , &w)
                     Assert(x >= previousRight + 4 && x + w <= size.Width - 10,
@@ -1546,12 +1652,23 @@ TestUnifiedTranslationWindow()
                 Assert(resultY >= (expanded ? sourceY + sourceHeight + 30 : 100), "Original text above translation")
                 Assert(resultHeight >= 60 && resultY + resultHeight <= size.Height - 46, "Translation fits above footer")
                 previousRight := 0
-                for control in [ResultView.ToggleButton, ResultView.ClearButton, ResultView.PasteButton, ResultView.TranslateButton]
+                for control in [ResultView.SourceSpeakButton, ResultView.ToggleButton,
+                    ResultView.ClearButton, ResultView.PasteButton, ResultView.TranslateButton]
                 {
                     control.GetPos(&x, , &w)
                     Assert(x >= previousRight + 6 && x + w <= size.Width - 10, "Source action buttons fit without overlap")
                     previousRight := x + w
                 }
+                ResultView.ToggleButton.GetPos(&toggleX, , &toggleWidth)
+                Assert(Abs(toggleX + toggleWidth / 2 - size.Width / 2) <= 0.5,
+                    "Source collapse button stays horizontally centered")
+                ResultView.SourceHeading.GetPos(&headingX, , &headingWidth)
+                ResultView.SourceSpeakButton.GetPos(&sourceSpeakX)
+                ResultView.ResultLabel.GetPos(&resultLabelX, , &resultLabelWidth)
+                ResultSpeakButton.GetPos(&resultSpeakX)
+                Assert(sourceSpeakX - headingX - headingWidth = 2
+                    && resultSpeakX - resultLabelX - resultLabelWidth = 2,
+                    "Both speech buttons stay close to their pane titles")
             }
         }
         SetTranslationSourceExpanded(false)
@@ -1633,6 +1750,88 @@ TestUnifiedTranslationWindow()
         ResultView.SourceList.Choose(1)
         ResultView.TargetList.Choose(1)
         ResultView.ServiceList.Choose(GetTranslationServiceIndex(savedService))
+    }
+}
+
+TestTranslationAlongsideSpeech()
+{
+    global ActiveInputDialog, InputDrafts, TestVoiceScenario, TestInputError
+    global TestSelectedText, TestTranslationTransport
+    savedDraft := InputDrafts.Has("voice") ? InputDrafts["voice"] : 0
+    savedSelection := TestSelectedText
+    savedTransport := TestTranslationTransport
+    try
+    {
+        HideResultWindow()
+        TestVoiceScenario := "translation"
+        TestInputError := ""
+        Critical "Off"
+        SpeakText(false)
+        Critical
+        Assert(TestInputError = "", TestInputError)
+        Assert(!IsObject(ActiveInputDialog), "Coexistence test closes speech input")
+    }
+    finally
+    {
+        Critical
+        TestVoiceScenario := ""
+        if IsObject(ActiveInputDialog)
+            CancelTranslationInput(ActiveInputDialog.Gui)
+        HideResultWindow()
+        TestSelectedText := savedSelection
+        TestTranslationTransport := savedTransport
+        if IsObject(savedDraft)
+            InputDrafts["voice"] := savedDraft
+        else if InputDrafts.Has("voice")
+            InputDrafts.Delete("voice")
+    }
+}
+
+InspectTranslationAlongsideSpeech()
+{
+    global ActiveInputDialog, ResultGui, ResultView, ActiveTranslationRequest
+    global TestInputError, TestSelectedText, TestTranslationTransport
+    try
+    {
+        dialog := ActiveInputDialog
+        dialog.Edit.Value := "  pinned speech draft  "
+        ToggleInputPinned(dialog.State, dialog.Gui, dialog.PinButton)
+        dialog.Gui.Show()
+        WinActivate("ahk_id " . dialog.Gui.Hwnd)
+        TranslateFromTray()
+        Assert(DllCall("IsWindowVisible", "Ptr", ResultGui.Hwnd)
+            && WinActive("ahk_id " . ResultGui.Hwnd),
+            "Tray translation opens and activates translation instead of pinned speech input")
+        CloseInactiveInputWindow(dialog.Gui.Hwnd)
+        Assert(ActiveInputDialog = dialog && DllCall("IsWindowVisible", "Ptr", dialog.Gui.Hwnd)
+            && dialog.State.Pinned && (WinGetExStyle("ahk_id " . dialog.Gui.Hwnd) & 8)
+            && dialog.Edit.Value == "  pinned speech draft  ",
+            "Opening translation preserves pinned speech input and its exact text")
+
+        HideResultWindow()
+        TestSelectedText := "selection alongside pinned speech"
+        TestTranslationTransport := TestTranslationHttp()
+        TranslateText(true)
+        Assert(DllCall("IsWindowVisible", "Ptr", ResultGui.Hwnd)
+            && WinActive("ahk_id " . ResultGui.Hwnd)
+            && ResultView.SourceEdit.Value = TestSelectedText
+            && IsObject(ActiveTranslationRequest)
+            && ActiveTranslationRequest.Chunks[1] = TestSelectedText,
+            "Selected-text translation opens its window and submits while speech input is pinned")
+        Assert(ActiveInputDialog = dialog && dialog.State.Pinned
+            && dialog.Edit.Value == "  pinned speech draft  ",
+            "Selected-text translation preserves speech input and pin state")
+        HideResultWindow()
+        SpeakText(false)
+        Assert(ActiveInputDialog = dialog && WinActive("ahk_id " . dialog.Gui.Hwnd),
+            "Reopening speech reuses and activates its existing window")
+    }
+    catch Error as inputError
+        TestInputError := inputError.Message
+    finally
+    {
+        if IsObject(ActiveInputDialog)
+            CancelTranslationInput(ActiveInputDialog.Gui)
     }
 }
 
@@ -1956,7 +2155,7 @@ TestTranslationWidthOnlyResize()
 
 TestTranslationMaximizedLayout()
 {
-    global ResultGui, ResultView, ResultEdit, ResultPinButton, ResultPauseButton
+    global ResultGui, ResultView, ResultEdit, ResultPinButton, ResultStopButton
     global ResultSpeakButton, ResultCopyButton, ResultCloseButton
     ResultView.SourceEdit.Value := "short source"
     ResultEdit.Value := "short result"
@@ -2047,11 +2246,12 @@ TestTranslationActionAndSwap()
             "Completion restores translation action")
         if ResultIconButtons.Count
             AssertInputIcon({Gui: ResultGui, IconButtons: ResultIconButtons}, ResultView.TranslateButton,
-                0xE72C, "翻译")
-        Assert(ControlGetStyle(ResultEdit) & 0x800, "Completed translation stays read-only")
+                0xF2B7, "翻译")
+        Assert(!(ControlGetStyle(ResultEdit) & 0x800), "Completed translation allows editing")
         result := ResultEdit.Value
         SendMessage(0x0102, Ord("x"), 1, , "ahk_id " . ResultEdit.Hwnd)
-        Assert(ResultEdit.Value = result, "Character input cannot modify translation")
+        Assert(ResultEdit.Value != result, "Character input modifies translation")
+        TestTranslationEditingAndSpeech()
 
         ResultEdit.Value := RepeatText("A long previous translation.`n", 50)
         FitTranslationWindow()
@@ -2128,6 +2328,91 @@ TestTranslationActionAndSwap()
         ResultGui.Hide()
     }
 }
+
+
+TestTranslationEditingAndSpeech()
+{
+    global ResultView, ResultEdit, ResultSpeakButton, ResultCopyButton, ResultGui
+    global SpeechSession, SpeechBusy, ResultIconButtons, ResultStopButton
+    edited := "Edited translation for reading and copying."
+    ResultEdit.Value := edited
+    HandleTranslationTextChange(ResultEdit)
+    CopyCurrentTranslation()
+    Assert(A_Clipboard = edited, "Copy uses the edited translation")
+    SpeakCurrentTranslation()
+    Assert(SpeechSession.Origin = "translation" && SpeechSession.Chunks[1] = edited,
+        "Speech uses the edited translation")
+    AssertSpeechControls()
+    TestTranslationPlaybackLayout()
+    previousSession := SpeechSession
+    SpeakCurrentSource()
+    Assert(SpeechSession != previousSession && SpeechSession.Origin = "source"
+        && SpeechSession.Chunks[1] = ResultView.SourceEdit.Value,
+        "Source speech replaces translation playback with the current original")
+    AssertSpeechControls()
+    TestTranslationPlaybackLayout()
+    if ResultIconButtons.Count
+        Assert(ResultIconButtons[ResultView.SourceSpeakButton.Hwnd].Selected
+            && !ResultIconButtons[ResultSpeakButton.Hwnd].Selected, "Only the active speech icon is highlighted")
+    ToggleSpeechPause()
+    SpeakCurrentTranslation()
+    Assert(SpeechSession.Origin = "translation" && !SpeechSession.Paused
+        && SpeechSession.Chunks[1] = edited, "Switching panes replaces paused speech and starts the new text")
+    AssertSpeechControls()
+    ResultEdit.Value := "Changed while speaking."
+    HandleTranslationTextChange(ResultEdit)
+    Assert(SpeechSession.Chunks[1] = edited, "Editing leaves current playback intact")
+    previousSession := SpeechSession
+    SpeakCurrentTranslation()
+    AssertSpeechControls(true)
+    SpeakCurrentTranslation()
+    AssertSpeechControls()
+    Assert(SpeechSession = previousSession && SpeechSession.Chunks[1] = edited,
+        "Pause and resume keep the existing session and original spoken text")
+    DispatchResultButton(ResultStopButton)
+    AssertSpeechControls(false, false)
+    SpeakCurrentTranslation()
+    Assert(SpeechSession.Chunks[1] = ResultEdit.Value, "Next playback reads the latest edit")
+    CompleteTestChunk()
+    FinishTestPlayback()
+    AssertSpeechControls(false, false)
+    ResultEdit.Value := ""
+    HandleTranslationTextChange(ResultEdit)
+    FitTranslationWindow()
+    Assert(ResultEdit.Visible && !(ControlGetStyle(ResultEdit) & 0x800)
+        && !ResultSpeakButton.Enabled && !ResultCopyButton.Enabled,
+        "Deleting all translation text keeps the editor open and disables empty actions")
+    ResultEdit.Value := edited
+    HandleTranslationTextChange(ResultEdit)
+    HideResultWindow()
+    OpenTranslationWindow()
+    Assert(ResultEdit.Value = edited && !(ControlGetStyle(ResultEdit) & 0x800)
+        && ResultSpeakButton.Enabled && ResultCopyButton.Enabled, "Reopening retains an editable translation draft")
+}
+
+
+TestTranslationPlaybackLayout()
+{
+    global ResultView, ResultEdit, ResultPinButton, ResultSpeakButton
+    global ResultCopyButton, ResultCloseButton, ResultGui
+    savedExpanded := ResultView.Expanded
+    try
+    {
+        for expanded in [true, false]
+        {
+            SetTranslationSourceExpanded(expanded)
+            for size in [{Width: 440, Height: 290}, {Width: 480, Height: 290}, {Width: 800, Height: 600}]
+            {
+                ResizeResultWindow(ResultEdit, ResultPinButton, ResultSpeakButton,
+                    ResultCopyButton, ResultCloseButton, ResultGui, 0, size.Width, size.Height)
+                AssertSpeechControls()
+                AssertTranslationToolbarLayout(size.Width, size.Height)
+            }
+        }
+    }
+    finally SetTranslationSourceExpanded(savedExpanded)
+}
+
 
 TestFailuresAndCancellation()
 {

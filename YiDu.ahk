@@ -1,4 +1,4 @@
-#Requires AutoHotkey v2.0
+﻿#Requires AutoHotkey v2.0
 #SingleInstance Off
 #Include speech\EdgeSpeechToken.ahk
 #Include settings\Hotkeys.ahk
@@ -90,7 +90,7 @@ global ResultView := 0
 global ResultEdit := 0
 global ResultPinButton := 0
 global ResultSpeakButton := 0
-global ResultPauseButton := 0
+global ResultStopButton := 0
 global ResultCopyButton := 0
 global ResultCloseButton := 0
 global ResultIconButtons := Map()
@@ -578,26 +578,37 @@ UpdateSpeechTrayState()
 
 UpdateSpeechControls()
 {
-    global SpeechBusy, SpeechSession, ResultSpeakButton, ResultPauseButton, ActiveInputDialog
+    global SpeechBusy, SpeechSession, ResultSpeakButton, ActiveInputDialog
+    global ResultView, ResultEdit, ResultCopyButton
 
     paused := IsObject(SpeechSession) && SpeechSession.Paused
+    origin := IsObject(SpeechSession) ? SpeechSession.Origin : ""
+    playbackText := paused ? "继续" : "暂停"
+    playbackIcon := paused ? 0xE768 : 0xE769
     UpdateSpeechTrayState()
     if IsObject(ResultSpeakButton)
     {
-        ResultSpeakButton.Text := SpeechBusy ? "停止" : "朗读"
-        UpdateIconButton(ResultSpeakButton, SpeechBusy ? 0xE71A : 0xE995)
+        readingResult := SpeechBusy && origin = "translation"
+        ResultSpeakButton.Text := readingResult ? playbackText : "朗读译文"
+        UpdateIconButton(ResultSpeakButton, readingResult ? playbackIcon : 0xE767, readingResult)
+        if IsObject(ResultView)
+        {
+            hasText := ResultView.ResultEditable && Trim(ResultEdit.Value) != ""
+            ResultSpeakButton.Enabled := readingResult || hasText
+            ResultCopyButton.Enabled := hasText
+            readingSource := SpeechBusy && origin = "source"
+            sourceButton := ResultView.SourceSpeakButton
+            sourceButton.Text := readingSource ? playbackText : "朗读原文"
+            sourceButton.Enabled := readingSource || Trim(ResultView.SourceEdit.Value) != ""
+            UpdateIconButton(sourceButton, readingSource ? playbackIcon : 0xE767, readingSource)
+        }
     }
-    if IsObject(ResultPauseButton)
-    {
-        ResultPauseButton.Text := paused ? "继续" : "暂停"
-        ResultPauseButton.Enabled := SpeechBusy
-        UpdateIconButton(ResultPauseButton, paused ? 0xE768 : 0xE769)
-    }
+    UpdateTranslationStopButton()
     if IsObject(ActiveInputDialog) && ActiveInputDialog.State.DraftKey = "voice"
     {
         ActiveInputDialog.SubmitButton.Text := SpeechBusy ? (paused ? "继续" : "暂停") : "朗读"
         ActiveInputDialog.CancelButton.Text := SpeechBusy ? "停止" : "关闭"
-        UpdateIconButton(ActiveInputDialog.SubmitButton, SpeechBusy ? (paused ? 0xE768 : 0xE769) : 0xE995)
+        UpdateIconButton(ActiveInputDialog.SubmitButton, SpeechBusy ? (paused ? 0xE768 : 0xE769) : 0xE767)
         UpdateIconButton(ActiveInputDialog.CancelButton, SpeechBusy ? 0xE71A : 0xE711)
     }
 }
@@ -1291,14 +1302,6 @@ TranslateFromTray(*)
 
 TranslateText(readSelection)
 {
-    global ActiveInputDialog
-
-    if IsObject(ActiveInputDialog)
-    {
-        try WinActivate("ahk_id " . ActiveInputDialog.Gui.Hwnd)
-        return
-    }
-
     if !EnsureOnlineServicesConsent()
         return
 
@@ -1484,7 +1487,7 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
         InitializeIconButton(inputGui, ActiveInputDialog.IconButtons, pinButton, 0xE718)
         InitializeIconButton(inputGui, ActiveInputDialog.IconButtons, cancelButton, 0xE711)
         if selectorType = "voice"
-            InitializeIconButton(inputGui, ActiveInputDialog.IconButtons, submitButton, 0xE995)
+            InitializeIconButton(inputGui, ActiveInputDialog.IconButtons, submitButton, 0xE767)
     }
 
     pinButton.OnEvent(
@@ -1567,8 +1570,29 @@ CreateControlTooltip(guiObject, control, text)
 }
 
 
-HasInputIconFont(fontName := "Segoe MDL2 Assets")
+GetInputIconFontName()
 {
+    static selectedFont := 0
+    if selectedFont = 0
+    {
+        selectedFont := ""
+        for fontName in ["Segoe Fluent Icons", "Segoe MDL2 Assets"]
+        {
+            if HasInputIconFont(fontName)
+            {
+                selectedFont := fontName
+                break
+            }
+        }
+    }
+    return selectedFont
+}
+
+
+HasInputIconFont(fontName := "")
+{
+    if fontName = ""
+        return GetInputIconFontName() != ""
     dc := DllCall("user32\GetDC", "Ptr", 0, "Ptr")
     font := CreateInputIconFont(96, fontName)
     if !dc || !font
@@ -1587,8 +1611,8 @@ HasInputIconFont(fontName := "Segoe MDL2 Assets")
         if StrGet(face, "UTF-16") != fontName
             return false
         glyphs := Chr(0xE718) . Chr(0xE77A) . Chr(0xE768) . Chr(0xE769) . Chr(0xE71A) . Chr(0xE711)
-            . Chr(0xE8C8) . Chr(0xE73E) . Chr(0xE995) . Chr(0xE77F)
-            . Chr(0xE74D) . Chr(0xE72C) . Chr(0xE70E) . Chr(0xE70D) . Chr(0xE8AB)
+            . Chr(0xE8C8) . Chr(0xE73E) . Chr(0xE767) . Chr(0xE77F)
+            . Chr(0xE74D) . Chr(0xF2B7) . Chr(0xE70E) . Chr(0xE70D) . Chr(0xE8AB)
         indices := Buffer(StrLen(glyphs) * 2, 0)
         if DllCall("gdi32\GetGlyphIndicesW", "Ptr", dc, "Str", glyphs,
             "Int", StrLen(glyphs), "Ptr", indices.Ptr, "UInt", 1, "UInt") = 0xFFFFFFFF
@@ -1607,8 +1631,10 @@ HasInputIconFont(fontName := "Segoe MDL2 Assets")
 }
 
 
-CreateInputIconFont(dpi, fontName := "Segoe MDL2 Assets")
+CreateInputIconFont(dpi, fontName := "")
 {
+    if fontName = ""
+        fontName := GetInputIconFontName()
     return DllCall("gdi32\CreateFontW", "Int", -Round(14 * dpi / 96),
         "Int", 0, "Int", 0, "Int", 0, "Int", 400, "UInt", 0, "UInt", 0,
         "UInt", 0, "UInt", 1, "UInt", 0, "UInt", 0, "UInt", 5, "UInt", 0,
@@ -1695,25 +1721,29 @@ DrawIconButton(lParam)
     rect := Buffer(16, 0)
     DllCall("RtlMoveMemory", "Ptr", rect.Ptr, "Ptr", lParam + hwndOffset + 2 * A_PtrSize, "UPtr", 16)
     palette := GetAppearancePalette()
-    pinned := button.Selected
+    selected := button.Selected
     disabled := itemState & 0x4
-    theme := DllCall("uxtheme\OpenThemeData", "Ptr", controlHwnd, "Str", "Button", "Ptr")
     savedDc := DllCall("gdi32\SaveDC", "Ptr", dc, "Int")
     font := 0
     try
     {
-        state := disabled ? 4 : (itemState & 1 ? 3 : (button.Hovered ? 2 : (itemState & 0x20 ? 5 : 1)))
-        drawn := theme && DllCall("uxtheme\DrawThemeBackground", "Ptr", theme,
-            "Ptr", dc, "Int", 1, "Int", state, "Ptr", rect.Ptr, "Ptr", 0, "Int") = 0
-        if !drawn || pinned
-        {
-            brush := DllCall("gdi32\CreateSolidBrush", "UInt",
-                RgbToColorRef(pinned ? palette.SelectionBackground : palette.FieldBackground), "Ptr")
-            DllCall("user32\FillRect", "Ptr", dc, "Ptr", rect.Ptr, "Ptr", brush)
-            DllCall("gdi32\DeleteObject", "Ptr", brush)
-        }
         dpi := 96
         try dpi := DllCall("user32\GetDpiForWindow", "Ptr", controlHwnd, "UInt")
+        background := DllCall("gdi32\CreateSolidBrush", "UInt", RgbToColorRef(palette.WindowBackground), "Ptr")
+        DllCall("user32\FillRect", "Ptr", dc, "Ptr", rect.Ptr, "Ptr", background)
+        DllCall("gdi32\DeleteObject", "Ptr", background)
+        if !disabled && (selected || button.Hovered || itemState & 1)
+        {
+            brush := DllCall("gdi32\CreateSolidBrush", "UInt",
+                RgbToColorRef(selected || itemState & 1 ? palette.SelectionBackground : palette.FieldBackground), "Ptr")
+            DllCall("gdi32\SelectObject", "Ptr", dc, "Ptr", brush)
+            DllCall("gdi32\SelectObject", "Ptr", dc, "Ptr", DllCall("gdi32\GetStockObject", "Int", 8, "Ptr")) ; NULL_PEN
+            radius := Round(8 * dpi / 96)
+            DllCall("gdi32\RoundRect", "Ptr", dc, "Int", 0, "Int", 0,
+                "Int", NumGet(rect, 8, "Int"), "Int", NumGet(rect, 12, "Int"), "Int", radius, "Int", radius)
+            DllCall("gdi32\SelectObject", "Ptr", dc, "Ptr", DllCall("gdi32\GetStockObject", "Int", 0, "Ptr"))
+            DllCall("gdi32\DeleteObject", "Ptr", brush)
+        }
         DllCall("gdi32\SetBkMode", "Ptr", dc, "Int", 1)
         DllCall("gdi32\SetTextColor", "Ptr", dc, "UInt",
             RgbToColorRef(disabled ? palette.MutedText : palette.Text))
@@ -1733,8 +1763,6 @@ DrawIconButton(lParam)
         DllCall("gdi32\RestoreDC", "Ptr", dc, "Int", savedDc)
         if font
             DllCall("gdi32\DeleteObject", "Ptr", font)
-        if theme
-            DllCall("uxtheme\CloseThemeData", "Ptr", theme)
     }
     return true
 }
@@ -2163,10 +2191,11 @@ MatchDropDownHeight(referenceControl, dropDownControl)
     )
 
     ; Item 0 sets every list row for a CBS_OWNERDRAWFIXED combo box.
+    dpi := DllCall("user32\GetDpiForWindow", "Ptr", dropDownControl.Hwnd, "UInt")
     SendMessage(
         CB_SETITEMHEIGHT,
         0,
-        targetSelectionHeight,
+        Max(targetSelectionHeight, Round(28 * dpi / 96)),
         ,
         "ahk_id " . dropDownControl.Hwnd
     )
@@ -2188,6 +2217,35 @@ MatchDropDownHeight(referenceControl, dropDownControl)
             ,
             "ahk_id " . dropDownControl.Hwnd
         )
+        FitDropDownPopupWidth(dropDownControl, itemCount, dpi)
+    }
+}
+
+
+FitDropDownPopupWidth(control, itemCount, dpi)
+{
+    dc := DllCall("user32\GetDC", "Ptr", control.Hwnd, "Ptr")
+    if !dc
+        return
+    font := SendMessage(0x0031, , , , "ahk_id " . control.Hwnd)
+    oldFont := font ? DllCall("gdi32\SelectObject", "Ptr", dc, "Ptr", font, "Ptr") : 0
+    try
+    {
+        GetPhysicalWindowRect(control.Hwnd, , , &width)
+        size := Buffer(8, 0)
+        Loop itemCount
+        {
+            text := GetDropDownItemText(control.Hwnd, A_Index - 1)
+            if DllCall("gdi32\GetTextExtentPoint32W", "Ptr", dc, "Str", text, "Int", StrLen(text), "Ptr", size)
+                width := Max(width, NumGet(size, 0, "Int") + Round(32 * dpi / 96))
+        }
+        SendMessage(0x0160, width, , , "ahk_id " . control.Hwnd) ; CB_SETDROPPEDWIDTH
+    }
+    finally
+    {
+        if oldFont
+            DllCall("gdi32\SelectObject", "Ptr", dc, "Ptr", oldFont)
+        DllCall("user32\ReleaseDC", "Ptr", control.Hwnd, "Ptr", dc)
     }
 }
 
@@ -2215,6 +2273,11 @@ DrawDropDownItem(wParam, lParam, message, hwnd)
     rectOffset := hwndOffset + (2 * A_PtrSize)
     controlHwnd := NumGet(lParam, hwndOffset, "Ptr")
     deviceContext := NumGet(lParam, hwndOffset + A_PtrSize, "Ptr")
+    if itemState & 0x1000 ; ODS_COMBOBOXEDIT: repaint the whole closed field, including its arrow.
+    {
+        DllCall("user32\InvalidateRect", "Ptr", controlHwnd, "Ptr", 0, "Int", false)
+        return true
+    }
 
     if itemId = 0xFFFFFFFF
     {
@@ -2945,10 +3008,10 @@ UrlEncode(text)
 }
 
 
-ShowTranslationResult(translatedText, pending := false)
+ShowTranslationResult(translatedText, pending := false, editable := true)
 {
     global ResultGui, ResultEdit, ResultPinButton, ResultSpeakButton
-    global ResultPauseButton, ResultCopyButton, ResultCloseButton
+    global ResultStopButton, ResultCopyButton, ResultCloseButton
     global ShowResultAtMouse, ResultView
 
     isNewWindow := !IsObject(ResultGui)
@@ -2966,10 +3029,10 @@ ShowTranslationResult(translatedText, pending := false)
     }
     else if !pending
         ResultView.PendingResultHeight := 0
+    ResultView.ResultEditable := !pending && editable
     ResultEdit.Value := translatedText
-    ResultEdit.Opt("+ReadOnly")
-    ResultSpeakButton.Enabled := !pending
-    ResultCopyButton.Enabled := !pending
+    ResultEdit.Opt(ResultView.ResultEditable ? "-ReadOnly" : "+ReadOnly")
+    RestoreCopyButtonFeedback()
     UpdateSpeechControls()
     FitTranslationWindow()
 
@@ -3136,20 +3199,20 @@ GetMonitorAtPoint(x, y)
 
 ShowTranslationError(message)
 {
-    ShowTranslationResult("翻译失败：`r`n" . message)
+    ShowTranslationResult("翻译失败：`r`n" . message, false, false)
 }
 
 
 CreateResultWindow()
 {
     global ResultGui, ResultEdit, ResultPinButton, ResultSpeakButton
-    global ResultPauseButton, ResultCopyButton, ResultCloseButton
+    global ResultStopButton, ResultCopyButton, ResultCloseButton
     global ResultIconButtons, ResultPinned, ResultView
     global CONFIG, TRANSLATION_LANGUAGES, TRANSLATION_SERVICES
 
     palette := GetAppearancePalette()
     ResultGui := Gui(
-        "+Resize +MinSize520x192",
+        "+Resize +MinSize440x192",
         "译读 · 翻译"
     )
     ResultGui.MarginX := 10
@@ -3178,52 +3241,56 @@ CreateResultWindow()
         ResultMinHeight: 64,
         ResultMaxHeight: 360,
         PendingResultHeight: 0,
-        SourceList: ResultGui.AddDropDownList("x10 y10 w100 +0x210", sourceLabels),
+        ResultEditable: false,
+        SourceList: ResultGui.AddDropDownList("x10 y10 w88 +0x210", sourceLabels),
         SwapButton: ResultGui.AddButton("x122 y10 w28 h26", "交换语言"),
         TargetList: ResultGui.AddDropDownList("x162 y10 w112 +0x210", targetLabels),
-        ServiceLabel: ResultGui.AddText("x414 y10 h26 +0x200", "翻译服务"),
-        ServiceList: ResultGui.AddDropDownList("x486 y10 w64 +0x210", serviceLabels),
-        SourceHeading: ResultGui.AddText("x10 y46 w40 h26 +0x200", "原文"),
-        ToggleButton: ResultGui.AddButton("x58 y46 w72 h26", "收起原文"),
-        ClearButton: ResultGui.AddButton("x302 y46 w72 h26", "清空"),
-        PasteButton: ResultGui.AddButton("x382 y46 w72 h26", "粘贴"),
-        TranslateButton: ResultGui.AddButton("x462 y46 w88 h26 Default", "翻译"),
-        SourceEdit: ResultGui.AddEdit("x10 y82 w540 h64 +Multi +WantReturn Background"
+        ServiceList: ResultGui.AddDropDownList("x406 y10 w64 +0x210", serviceLabels),
+        SourceHeading: ResultGui.AddText("x10 y46 w32 h26 +0x200", "原文"),
+        ToggleButton: ResultGui.AddButton("x208 y46 w64 h26", "收起原文"),
+        SourceSpeakButton: ResultGui.AddButton("x44 y46 w80 h26", "朗读原文"),
+        ClearButton: ResultGui.AddButton("x310 y46 w44 h26", "清空"),
+        PasteButton: ResultGui.AddButton("x362 y46 w44 h26", "粘贴"),
+        TranslateButton: ResultGui.AddButton("x414 y46 w56 h26 Default", "翻译"),
+        SourceEdit: ResultGui.AddEdit("x10 y82 w460 h64 +Multi +WantReturn Background"
             . palette.FieldBackground . " c" . palette.Text),
-        ResultLabel: ResultGui.AddText("x10 y154 w200 h22 +0x200 Hidden", "译文")
+        ResultLabel: ResultGui.AddText("x10 y154 w32 h22 +0x200 Hidden", "译文")
     }
     ResultView.SourceList.Choose(1)
     ResultView.TargetList.Choose(1)
     ResultView.SourceTooltip := CreateControlTooltip(ResultGui, ResultView.SourceList, "源语言")
     ResultView.TargetTooltip := CreateControlTooltip(ResultGui, ResultView.TargetList, "目标语言")
+    ResultView.ServiceTooltip := CreateControlTooltip(ResultGui, ResultView.ServiceList, "翻译服务，点击切换")
     ResultView.ServiceList.Choose(GetTranslationServiceIndex(CONFIG.TranslationService))
     ResultEdit := ResultGui.AddEdit(
-        "x10 y180 w540 h64 +Multi +WantReturn +ReadOnly Hidden Background"
+        "x10 y180 w460 h64 +Multi +WantReturn +ReadOnly Hidden Background"
             . palette.FieldBackground . " c" . palette.Text
     )
     useIcons := HasInputIconFont()
     ResultIconButtons := Map()
-    ResultPinButton := ResultGui.AddButton("xm y+10 w" . (useIcons ? 28 : 72) . " h26", "钉住")
-    ResultPauseButton := ResultGui.AddButton("x" . (useIcons ? 262 : 114) . " yp w" . (useIcons ? 28 : 64) . " h26 Hidden", "暂停")
-    ResultSpeakButton := ResultGui.AddButton("x+8 yp w" . (useIcons ? 28 : 64) . " h26 Hidden", "朗读")
-    ResultCopyButton := ResultGui.AddButton("x+8 yp w" . (useIcons ? 28 : 72) . " h26 Hidden", "复制结果")
-    ResultCloseButton := ResultGui.AddButton("x+8 yp w" . (useIcons ? 28 : 52) . " h26", "关闭")
+    ResultSpeakButton := ResultGui.AddButton("x44 y152 w" . (useIcons ? 28 : 80) . " h26 Hidden", "朗读译文")
+    ResultCopyButton := ResultGui.AddButton("x398 y152 w" . (useIcons ? 28 : 72) . " h26 Hidden", "复制结果")
+    ResultPinButton := ResultGui.AddButton("x10 y254 w" . (useIcons ? 28 : 72) . " h26", "钉住")
+    ResultStopButton := ResultGui.AddButton("x78 y152 w" . (useIcons ? 28 : 48) . " h26 Hidden", "停止")
+    ResultCloseButton := ResultGui.AddButton("x418 y254 w" . (useIcons ? 28 : 52) . " h26", "关闭")
     ResultSpeakButton.Enabled := false
     ResultCopyButton.Enabled := false
-    ResultView.SourceEdit.OnEvent("Change", QueueTranslationWindowFit)
-    ResultEdit.OnEvent("Change", QueueTranslationWindowFit)
+    ResultView.SourceEdit.OnEvent("Change", HandleTranslationTextChange)
+    ResultEdit.OnEvent("Change", HandleTranslationTextChange)
     if useIcons
     {
         InitializeIconButton(ResultGui, ResultIconButtons, ResultView.SwapButton, 0xE8AB)
-        for control in [ResultView.ToggleButton, ResultView.ClearButton, ResultView.PasteButton, ResultView.TranslateButton]
+        for control in [ResultView.ToggleButton, ResultView.SourceSpeakButton,
+            ResultView.ClearButton, ResultView.PasteButton, ResultView.TranslateButton]
             control.Move(, , 28)
         InitializeIconButton(ResultGui, ResultIconButtons, ResultView.ToggleButton, 0xE70E)
+        InitializeIconButton(ResultGui, ResultIconButtons, ResultView.SourceSpeakButton, 0xE767)
         InitializeIconButton(ResultGui, ResultIconButtons, ResultView.PasteButton, 0xE77F)
         InitializeIconButton(ResultGui, ResultIconButtons, ResultView.ClearButton, 0xE74D)
-        InitializeIconButton(ResultGui, ResultIconButtons, ResultView.TranslateButton, 0xE72C)
+        InitializeIconButton(ResultGui, ResultIconButtons, ResultView.TranslateButton, 0xF2B7)
         InitializeIconButton(ResultGui, ResultIconButtons, ResultPinButton, 0xE718)
-        InitializeIconButton(ResultGui, ResultIconButtons, ResultPauseButton, 0xE769)
-        InitializeIconButton(ResultGui, ResultIconButtons, ResultSpeakButton, 0xE995)
+        InitializeIconButton(ResultGui, ResultIconButtons, ResultStopButton, 0xE71A)
+        InitializeIconButton(ResultGui, ResultIconButtons, ResultSpeakButton, 0xE767)
         InitializeIconButton(ResultGui, ResultIconButtons, ResultCopyButton, 0xE8C8)
         InitializeIconButton(ResultGui, ResultIconButtons, ResultCloseButton, 0xE711)
     }
@@ -3244,11 +3311,12 @@ CreateResultWindow()
     ResultView.PasteButton.OnEvent("Click", PasteTranslationSource)
     ResultView.ClearButton.OnEvent("Click", ClearTranslationSource)
     ResultView.TranslateButton.OnEvent("Click", HandleTranslationButton)
+    ResultView.SourceSpeakButton.OnEvent("Click", SpeakCurrentSource)
     ResultView.SwapButton.OnEvent("Click", SwapTranslationLanguages)
     for selector in [ResultView.SourceList, ResultView.TargetList, ResultView.ServiceList]
         selector.OnEvent("Change", ChangeTranslationOptions)
     ResultSpeakButton.OnEvent("Click", SpeakCurrentTranslation)
-    ResultPauseButton.OnEvent("Click", ToggleSpeechPause)
+    ResultStopButton.OnEvent("Click", StopSpeech)
     ResultCopyButton.OnEvent("Click", CopyCurrentTranslation)
     ResultCloseButton.OnEvent("Click", HideResultWindow)
     ResultGui.OnEvent("Close", HideResultWindow)
@@ -3260,7 +3328,6 @@ CreateResultWindow()
         ResizeResultWindow.Bind(
             ResultEdit,
             ResultPinButton,
-            ResultPauseButton,
             ResultSpeakButton,
             ResultCopyButton,
             ResultCloseButton
@@ -3341,6 +3408,8 @@ OpenTranslationWindow(sourceText := "")
     {
         CancelTranslationRequest()
         ResultView.SourceEdit.Value := sourceText
+        ResultView.ResultEditable := false
+        ResultEdit.Opt("+ReadOnly")
         ResultEdit.Value := ""
         SetTranslationSourceExpanded(false)
     }
@@ -3349,6 +3418,7 @@ OpenTranslationWindow(sourceText := "")
 
     ResultView.ServiceList.Choose(GetTranslationServiceIndex(CONFIG.TranslationService))
     wasVisible := DllCall("IsWindowVisible", "Ptr", ResultGui.Hwnd)
+    UpdateSpeechControls()
     FitTranslationWindow()
     if DllCall("user32\IsIconic", "Ptr", ResultGui.Hwnd)
         WinRestore("ahk_id " . ResultGui.Hwnd)
@@ -3417,7 +3487,7 @@ ToggleTranslationSource(*)
 
 SetTranslationSourceExpanded(expanded)
 {
-    global ResultGui, ResultView, ResultEdit, ResultPinButton, ResultPauseButton
+    global ResultGui, ResultView, ResultEdit, ResultPinButton, ResultStopButton
     global ResultSpeakButton, ResultCopyButton, ResultCloseButton
     ResultView.Expanded := expanded
     ResultView.SourceEdit.Visible := expanded
@@ -3432,6 +3502,7 @@ PasteTranslationSource(*)
     global ResultView
     ClearTranslationSource()
     ResultView.SourceEdit.Value := A_Clipboard
+    UpdateSpeechControls()
     SendMessage(0x00B1, 0, -1, , "ahk_id " . ResultView.SourceEdit.Hwnd)
     FitTranslationWindow()
 }
@@ -3442,12 +3513,14 @@ ClearTranslationSource(*)
     global ResultView, ResultEdit, ResultSpeakButton, ResultCopyButton
     CancelTranslationRequest()
     StopSpeech()
+    ResultView.ResultEditable := false
     ResultView.SourceEdit.Value := ""
     ResultEdit.Value := ""
     ResultEdit.Opt("+ReadOnly")
     ResultSpeakButton.Enabled := false
     ResultCopyButton.Enabled := false
     RestoreCopyButtonFeedback()
+    UpdateSpeechControls()
     SetTranslationSourceExpanded(true)
     ResultView.SourceEdit.Focus()
 }
@@ -3461,6 +3534,16 @@ QueueTranslationWindowFit(*)
     {
         SetTimer(FitTranslationWindow, -100)
     }
+}
+
+
+HandleTranslationTextChange(control, *)
+{
+    global ResultEdit
+    if control = ResultEdit
+        RestoreCopyButtonFeedback()
+    UpdateSpeechControls()
+    QueueTranslationWindowFit()
 }
 
 
@@ -3494,12 +3577,33 @@ MeasureTranslationEditHeight(edit, width, minimum, maximum)
 
 UpdateTranslationResultVisibility()
 {
-    global ResultView, ResultEdit, ResultPauseButton, ResultSpeakButton, ResultCopyButton
-    visible := ResultEdit.Value != ""
-    for control in [ResultView.ResultLabel, ResultEdit, ResultPauseButton, ResultSpeakButton, ResultCopyButton]
+    global ResultView, ResultEdit, ResultSpeakButton, ResultCopyButton
+    visible := ResultView.ResultEditable || ResultEdit.Value != ""
+    for control in [ResultView.ResultLabel, ResultEdit, ResultSpeakButton, ResultCopyButton]
         if control.Visible != visible
             control.Visible := visible
     return visible
+}
+
+
+UpdateTranslationStopButton()
+{
+    global ResultView, ResultSpeakButton, ResultStopButton, SpeechBusy, SpeechSession
+    if !IsObject(ResultView) || !IsObject(ResultStopButton)
+        return
+
+    origin := SpeechBusy && IsObject(SpeechSession) ? SpeechSession.Origin : ""
+    anchor := origin = "source" ? ResultView.SourceSpeakButton
+        : (origin = "translation" ? ResultSpeakButton : 0)
+    visible := IsObject(anchor) && anchor.Visible
+    if visible
+    {
+        anchor.GetPos(&x, &y, &width)
+        ResultStopButton.Move(x + width + 6, y)
+    }
+    ResultStopButton.Enabled := visible
+    if ResultStopButton.Visible != visible
+        ResultStopButton.Visible := visible
 }
 
 
@@ -3517,7 +3621,7 @@ GetTranslationPaneHeights(width)
 
 FitTranslationWindow(*)
 {
-    global ResultGui, ResultView, ResultEdit, ResultPinButton, ResultPauseButton
+    global ResultGui, ResultView, ResultEdit, ResultPinButton, ResultStopButton
     global ResultSpeakButton, ResultCopyButton, ResultCloseButton
     if !IsObject(ResultGui) || !IsObject(ResultView) || ResultView.AutoSizing
         return
@@ -3529,11 +3633,11 @@ FitTranslationWindow(*)
         ResultGui.GetClientPos(, , &width, &height)
         if DllCall("user32\IsZoomed", "Ptr", ResultGui.Hwnd)
         {
-            ResizeResultWindow(ResultEdit, ResultPinButton, ResultPauseButton, ResultSpeakButton,
+            ResizeResultWindow(ResultEdit, ResultPinButton, ResultSpeakButton,
                 ResultCopyButton, ResultCloseButton, ResultGui, 1, width, height)
             return
         }
-        width := width >= 520 ? width : 560
+        width := ResultView.LastWidth = 0 ? 480 : Max(440, width)
         paneHeights := GetTranslationPaneHeights(width)
         if hasResult
         {
@@ -3563,14 +3667,14 @@ FitTranslationWindow(*)
             maximum := Min(maximum, Max(minimum, Floor((workHeight - frameHeight - 20) * 96 / Max(96, dpi))))
         }
         desired := Min(maximum, Max(minimum, desired))
-        ResultGui.Opt("+MinSize520x" . minimum)
+        ResultGui.Opt("+MinSize440x" . minimum)
         visible := DllCall("IsWindowVisible", "Ptr", ResultGui.Hwnd)
         if height != desired || ResultView.LastWidth = 0
         {
             ResultGui.Show((visible ? "NA " : "Hide ") . "w" . width . " h" . desired)
         }
         ResultGui.GetClientPos(, , &width, &height)
-        ResizeResultWindow(ResultEdit, ResultPinButton, ResultPauseButton, ResultSpeakButton,
+        ResizeResultWindow(ResultEdit, ResultPinButton, ResultSpeakButton,
             ResultCopyButton, ResultCloseButton, ResultGui, 0, width, height)
         if visible
         {
@@ -3599,7 +3703,7 @@ UpdateTranslationButton(busy)
     control := ResultView.TranslateButton
     control.Enabled := true
     control.Text := busy ? "取消翻译" : "翻译"
-    UpdateIconButton(control, busy ? 0xE71A : 0xE72C)
+    UpdateIconButton(control, busy ? 0xE71A : 0xF2B7)
 }
 
 
@@ -3702,29 +3806,45 @@ ToggleResultPinned(*)
 }
 
 
+SpeakCurrentSource(*)
+{
+    global ResultView
+    if IsObject(ResultView)
+        SpeakTranslationPane(ResultView.SourceEdit, "source")
+}
+
+
 SpeakCurrentTranslation(*)
 {
-    global CONFIG, ResultEdit, SpeechBusy
+    global ResultView, ResultEdit
+    if IsObject(ResultView) && ResultView.ResultEditable
+        SpeakTranslationPane(ResultEdit, "translation")
+}
 
-    if SpeechBusy
+
+SpeakTranslationPane(edit, origin)
+{
+    global CONFIG, SpeechBusy, SpeechSession
+
+    if SpeechBusy && IsObject(SpeechSession) && SpeechSession.Origin = origin
     {
-        StopSpeech()
+        ToggleSpeechPause()
         return
     }
 
-    if !IsObject(ResultEdit)
+    if !IsObject(edit)
         return
 
-    text := Trim(ResultEdit.Value)
+    text := Trim(edit.Value)
 
     if text = ""
         return
 
-    StartEdgeSpeech(text, CONFIG.SpeechVoice)
+    StartEdgeSpeech(text, CONFIG.SpeechVoice, origin)
 }
 
 
-StartEdgeSpeech(text, voice)
+StartEdgeSpeech(text, voice, origin := "")
 {
     global CONFIG, SPEECH_SPEEDS, SpeechBusy, SpeechSession
 
@@ -3749,6 +3869,7 @@ StartEdgeSpeech(text, voice)
     SpeechSession := {
         Chunks: chunks,
         Voice: voice,
+        Origin: origin,
         Rate: SPEECH_SPEEDS[GetSpeechSpeedIndex(CONFIG.SpeechSpeed)].Rate,
         BasePath: A_Temp . "\YiDuTTS_" . uniqueId,
         NextIndex: 1,
@@ -5044,6 +5165,10 @@ DrawDarkCheckbox(control, customDraw, palette)
 
 ApplyDropDownTheme(dropDownControl)
 {
+    static subclass := CallbackCreate(DropDownWindowProc, , 6)
+    ; Keep the native combo for keyboard access and popup selection; paint a borderless field.
+    DllCall("comctl32\SetWindowSubclass", "Ptr", dropDownControl.Hwnd,
+        "Ptr", subclass, "UPtr", 1, "UPtr", subclass)
     palette := GetAppearancePalette()
     darkModeEnabled := palette.DarkTitleBar
     comboBoxInfo := Buffer(A_PtrSize = 8 ? 64 : 52, 0)
@@ -5089,6 +5214,100 @@ ApplyDropDownTheme(dropDownControl)
             "Str", palette.ControlTheme,
             "Ptr", 0
         )
+    }
+}
+
+
+DropDownWindowProc(hwnd, message, wParam, lParam, subclassId, referenceData)
+{
+    if message = 0x0082 ; WM_NCDESTROY
+    {
+        DllCall("user32\RemovePropW", "Ptr", hwnd, "Str", "YiDu.DropDownHover")
+        DllCall("comctl32\RemoveWindowSubclass", "Ptr", hwnd,
+            "Ptr", referenceData, "UPtr", subclassId)
+    }
+    else if message = 0x000F ; WM_PAINT
+    {
+        paint := Buffer(A_PtrSize = 8 ? 72 : 64, 0)
+        dc := DllCall("user32\BeginPaint", "Ptr", hwnd, "Ptr", paint, "Ptr")
+        try DrawDropDownField(hwnd, dc)
+        finally DllCall("user32\EndPaint", "Ptr", hwnd, "Ptr", paint)
+        return 0
+    }
+    else if message = 0x0318 ; WM_PRINTCLIENT
+    {
+        DrawDropDownField(hwnd, wParam)
+        return 0
+    }
+    else if message = 0x0014 ; WM_ERASEBKGND
+        return 1
+    else if message = 0x0200 && !DllCall("user32\GetPropW", "Ptr", hwnd, "Str", "YiDu.DropDownHover", "Ptr")
+    {
+        DllCall("user32\SetPropW", "Ptr", hwnd, "Str", "YiDu.DropDownHover", "Ptr", 1)
+        tracking := Buffer(A_PtrSize = 8 ? 24 : 16, 0)
+        NumPut("UInt", tracking.Size, "UInt", 2, "Ptr", hwnd, tracking)
+        DllCall("user32\TrackMouseEvent", "Ptr", tracking)
+        DllCall("user32\InvalidateRect", "Ptr", hwnd, "Ptr", 0, "Int", false)
+    }
+    else if message = 0x02A3 ; WM_MOUSELEAVE
+    {
+        DllCall("user32\RemovePropW", "Ptr", hwnd, "Str", "YiDu.DropDownHover")
+        DllCall("user32\InvalidateRect", "Ptr", hwnd, "Ptr", 0, "Int", false)
+    }
+    result := DllCall("comctl32\DefSubclassProc", "Ptr", hwnd, "UInt", message,
+        "UPtr", wParam, "Ptr", lParam, "Ptr")
+    if message = 0x0007 || message = 0x0008 || message = 0x000A || message = 0x014E
+        DllCall("user32\InvalidateRect", "Ptr", hwnd, "Ptr", 0, "Int", false)
+    return result
+}
+
+
+DrawDropDownField(hwnd, dc)
+{
+    if !dc
+        return
+    palette := GetAppearancePalette()
+    dpi := DllCall("user32\GetDpiForWindow", "Ptr", hwnd, "UInt")
+    enabled := DllCall("user32\IsWindowEnabled", "Ptr", hwnd)
+    focused := DllCall("user32\GetFocus", "Ptr") = hwnd
+    opened := DllCall("user32\SendMessageW", "Ptr", hwnd, "UInt", 0x0157, "Ptr", 0, "Ptr", 0)
+    hovered := DllCall("user32\GetPropW", "Ptr", hwnd, "Str", "YiDu.DropDownHover", "Ptr")
+    rect := Buffer(16, 0)
+    DllCall("user32\GetClientRect", "Ptr", hwnd, "Ptr", rect)
+    width := NumGet(rect, 8, "Int"), height := NumGet(rect, 12, "Int")
+    savedDc := DllCall("gdi32\SaveDC", "Ptr", dc, "Int")
+    background := !enabled ? palette.WindowBackground
+        : (focused || opened || hovered ? palette.SelectionBackground : palette.FieldBackground)
+    brush := DllCall("gdi32\CreateSolidBrush", "UInt", RgbToColorRef(background), "Ptr")
+    pen := 0
+    try
+    {
+        DllCall("user32\FillRect", "Ptr", dc, "Ptr", rect, "Ptr", brush)
+        NumPut("Int", Round(8 * dpi / 96), rect, 0)
+        NumPut("Int", width - Round(22 * dpi / 96), rect, 8)
+        font := DllCall("user32\SendMessageW", "Ptr", hwnd, "UInt", 0x0031, "Ptr", 0, "Ptr", 0, "Ptr")
+        if font
+            DllCall("gdi32\SelectObject", "Ptr", dc, "Ptr", font)
+        DllCall("gdi32\SetBkMode", "Ptr", dc, "Int", 1)
+        DllCall("gdi32\SetTextColor", "Ptr", dc, "UInt", RgbToColorRef(enabled ? palette.Text : palette.MutedText))
+        itemId := DllCall("user32\SendMessageW", "Ptr", hwnd, "UInt", 0x0147, "Ptr", 0, "Ptr", 0, "Int")
+        DllCall("user32\DrawTextW", "Ptr", dc, "Str", GetDropDownItemText(hwnd, itemId),
+            "Int", -1, "Ptr", rect, "UInt", 0x8824)
+        pen := DllCall("gdi32\CreatePen", "Int", 0, "Int", Max(1, Round(dpi / 96)),
+            "UInt", RgbToColorRef(palette.MutedText), "Ptr")
+        DllCall("gdi32\SelectObject", "Ptr", dc, "Ptr", pen)
+        centerX := width - Round(12 * dpi / 96), centerY := Floor(height / 2)
+        span := Round(3 * dpi / 96)
+        DllCall("gdi32\MoveToEx", "Ptr", dc, "Int", centerX - span, "Int", centerY - 1, "Ptr", 0)
+        DllCall("gdi32\LineTo", "Ptr", dc, "Int", centerX, "Int", centerY + span - 1)
+        DllCall("gdi32\LineTo", "Ptr", dc, "Int", centerX + span, "Int", centerY - 1)
+    }
+    finally
+    {
+        DllCall("gdi32\RestoreDC", "Ptr", dc, "Int", savedDc)
+        DllCall("gdi32\DeleteObject", "Ptr", brush)
+        if pen
+            DllCall("gdi32\DeleteObject", "Ptr", pen)
     }
 }
 
@@ -5154,7 +5373,6 @@ RedrawGuiWindow(guiObject)
 ResizeResultWindow(
     resultEdit,
     pinButton,
-    pauseButton,
     speakButton,
     copyButton,
     closeButton,
@@ -5168,7 +5386,7 @@ ResizeResultWindow(
     if minMax = -1
         return
 
-    ; Keep the language controls together; only the gap before the service group stretches.
+    ; Keep the language controls together and the service selector at the right edge.
     nextX := 10
     for control in [ResultView.SourceList, ResultView.SwapButton, ResultView.TargetList]
     {
@@ -5176,10 +5394,10 @@ ResizeResultWindow(
         control.Move(nextX, 10)
         nextX += controlWidth + 12
     }
-    ResultView.ServiceLabel.GetPos(, , &labelWidth)
     ResultView.ServiceList.GetPos(, , &selectorWidth)
     ResultView.ServiceList.Move(width - 10 - selectorWidth, 10)
-    ResultView.ServiceLabel.Move(width - 10 - selectorWidth - 4 - labelWidth, 10)
+    ResultView.ToggleButton.GetPos(, , &toggleWidth)
+    ResultView.ToggleButton.Move(Floor((width - toggleWidth) / 2), 46)
     nextX := width - 10
     for control in [ResultView.TranslateButton, ResultView.PasteButton, ResultView.ClearButton]
     {
@@ -5204,6 +5422,9 @@ ResizeResultWindow(
     if hasResult
     {
         ResultView.ResultLabel.Move(10, labelY)
+        speakButton.Move(44, labelY - 2)
+        copyButton.GetPos(, , &copyWidth)
+        copyButton.Move(width - 10 - copyWidth, labelY - 2)
         resultY := labelY + 26
         resultHeight := Max(ResultView.ResultMinHeight, height - 46 - resultY)
         if !maximized
@@ -5212,13 +5433,9 @@ ResizeResultWindow(
     }
     pinButton.Move(10, height - 36)
     nextX := width - 10
-    for control in [closeButton, copyButton, speakButton, pauseButton]
-    {
-        control.GetPos(, , &controlWidth)
-        nextX -= controlWidth
-        control.Move(nextX, height - 36)
-        nextX -= 8
-    }
+    closeButton.GetPos(, , &controlWidth)
+    closeButton.Move(nextX - controlWidth, height - 36)
+    UpdateTranslationStopButton()
     widthChanged := ResultView.LastWidth != width
     modeChanged := ResultView.LastMinMax != minMax
     ResultView.LastWidth := width

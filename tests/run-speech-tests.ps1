@@ -21,7 +21,7 @@ try {
     $settings = Get-SourceBlock 'global CONFIG :=' 'global IS_PACKAGED :='
     $menuGlobals = Get-SourceBlock 'global SettingsDialog :=' 'global SpeechAudioPath :='
     $globals = Get-SourceBlock 'global SpeechAudioPath :=' 'LoadConfig()'
-    $speech = Get-SourceBlock "`nStartEdgeSpeech(text, voice)`n" "`nCleanupSpeech(*)`n"
+    $speech = Get-SourceBlock "`nStartEdgeSpeech(" "`nCleanupSpeech(*)`n"
     $speech = $speech.Replace('TrayTip(', 'TestTrayTip(')
     $worker = Get-SourceBlock "`nBuildEdgeSpeechWorkerPowerShell(" "`nGetAppearancePalette()`n"
     $tray = Get-SourceBlock "`nSetupTrayMenu()`n{`n" "`nShowAboutDialog(*)`n"
@@ -52,15 +52,15 @@ try {
     $translationRequests = Get-SourceBlock "`nBuildTranslationRequest(" "`nParseTranslationResponse("
     $urlEncoding = Get-SourceBlock "`nUrlEncode(" "`nShowTranslationResult("
     $resultDisplay = Get-SourceBlock "`nShowTranslationResult(" "`nPositionResultWindowAtMouse("
-    $resultDisplay = $resultDisplay.Replace('ShowTranslationResult(translatedText, pending := false)',
-        'RenderTranslationResult(translatedText, pending := false)')
+    $resultDisplay = $resultDisplay.Replace('ShowTranslationResult(translatedText, pending := false, editable := true)',
+        'RenderTranslationResult(translatedText, pending := false, editable := true)')
     $translationEvents = Get-SourceBlock "`nRetryCurrentTranslationChunk()`n" "`nBuildTranslationRequest("
     $hideResult = Get-SourceBlock "`nHideResultWindow(*)`n" "`nCopyCurrentTranslation(*)`n"
     $resultCreate = Get-SourceBlock "`nCreateResultWindow()`n" "`nHideResultWindow(*)`n"
     if ($TextButtons) {
         $resultCreate = $resultCreate.Replace('useIcons := HasInputIconFont()', 'useIcons := false')
     }
-    $resultCommands = Get-SourceBlock "`nCopyCurrentTranslation(*)`n" "`nStartEdgeSpeech(text, voice)`n"
+    $resultCommands = Get-SourceBlock "`nCopyCurrentTranslation(*)`n" "`nStartEdgeSpeech("
     $resultResize = Get-SourceBlock "`nResizeResultWindow(" "`nclass JsonParser`n"
     $windowRect = Get-SourceBlock "`nGetPhysicalWindowRect(" "`nMoveWindowPhysical("
     $appearance = Get-SourceBlock "`nGetAppearancePalette()`n" "`nApplyAppearanceToOpenWindows()`n"
