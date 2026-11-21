@@ -560,17 +560,24 @@ InspectTestInput(mode)
             Assert(IsObject(dialog.SpeedTooltip), "Native speed tooltip created")
             TestTooltipHwnd := dialog.SpeedTooltip.Hwnd
             Assert(DllCall("IsWindow", "Ptr", TestTooltipHwnd), "Tooltip window is alive")
-            Assert(StrGet(dialog.SpeedTooltip.TextBuffer, "UTF-16") = "朗读速度，点击切换", "Speed tooltip text")
+            Assert(StrGet(dialog.SpeedTooltip.TextBuffer, "UTF-16") = "朗读速度，点击选择；下次朗读生效", "Speed tooltip text")
             SetSpeechSpeed(0.75)
-            for speed in [1, 1.25, 1.5, 2, 0.75]
+            dialog.SpeedMenu := BuildSpeechSpeedMenu()
+            Assert(DllCall("GetMenuItemCount", "Ptr", dialog.SpeedMenu.Handle) = 5,
+                "Speed menu offers all five speeds")
+            for speed in [2, 1, 1.5, 0.75, 1.25]
             {
-                buttonId := DllCall("GetDlgCtrlID", "Ptr", dialog.SpeedButton.Hwnd, "Int")
-                DllCall("PostMessageW", "Ptr", dialog.Gui.Hwnd, "UInt", 0x111,
-                    "UPtr", buttonId, "Ptr", dialog.SpeedButton.Hwnd)
+                label := SPEECH_SPEEDS[GetSpeechSpeedIndex(speed)].Label
+                commandId := DllCall("GetMenuItemID", "Ptr", dialog.SpeedMenu.Handle,
+                    "Int", MenuItemPosition(dialog.SpeedMenu, label), "UInt")
+                PostMessage(0x0111, commandId, 0, , "ahk_id " . A_ScriptHwnd)
                 Critical "Off"
                 Sleep(30)
                 Critical
-                Assert(CONFIG.SpeechSpeed = speed, "Speed button cycles and wraps")
+                Assert(CONFIG.SpeechSpeed = speed, "Speed menu selects the requested speed directly")
+                for item in SPEECH_SPEEDS
+                    Assert(!!(MenuItemState(dialog.SpeedMenu, item.Label) & 8) = (item.Value = speed),
+                        "Speed menu checks only the selected speed")
                 Assert(dialog.SpeedButton.Text = GetSpeechSpeedLabel(), "Speed button label updated")
                 Assert(IniRead(CONFIG_PATH, "Settings", "SpeechSpeed") + 0 = speed, "Speed choice persisted")
                 dialog.SpeedButton.GetPos(, , &buttonWidth)
@@ -1475,7 +1482,7 @@ TestResultSpeechControls()
             AssertInputIcon(resultDialog, ResultView.SwapButton, 0xE8AB, "交换语言")
             AssertInputIcon(resultDialog, ResultView.PasteButton, 0xE77F, "粘贴")
             AssertInputIcon(resultDialog, ResultView.ClearButton, 0xE74D, "清空")
-            AssertInputIcon(resultDialog, ResultView.TranslateButton, 0xF2B7, "翻译")
+            AssertInputIcon(resultDialog, ResultView.TranslateButton, 0xE72C, "翻译")
             AssertInputIcon(resultDialog, ResultView.SourceSpeakButton, 0xE767, "朗读原文")
             AssertInputIcon(resultDialog, ResultPinButton, 0xE718, "钉住")
             AssertInputIcon(resultDialog, ResultCopyButton, 0xE8C8, "复制结果")
@@ -2246,7 +2253,7 @@ TestTranslationActionAndSwap()
             "Completion restores translation action")
         if ResultIconButtons.Count
             AssertInputIcon({Gui: ResultGui, IconButtons: ResultIconButtons}, ResultView.TranslateButton,
-                0xF2B7, "翻译")
+                0xE72C, "翻译")
         Assert(!(ControlGetStyle(ResultEdit) & 0x800), "Completed translation allows editing")
         result := ResultEdit.Value
         SendMessage(0x0102, Ord("x"), 1, , "ahk_id " . ResultEdit.Hwnd)

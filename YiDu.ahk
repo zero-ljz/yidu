@@ -1443,8 +1443,8 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
             "x" . (inputWidth - rightWidth - 292) . " yp w220 +0x210", voiceLabels
         )
         speedButton := inputGui.AddButton("x" . (inputWidth - rightWidth - 64) . " yp w56 h26", GetSpeechSpeedLabel())
-        speedButton.OnEvent("Click", CycleSpeechSpeed)
-        speedTooltip := CreateControlTooltip(inputGui, speedButton, "朗读速度，点击切换")
+        speedButton.OnEvent("Click", ShowSpeechSpeedMenu)
+        speedTooltip := CreateControlTooltip(inputGui, speedButton, "朗读速度，点击选择；下次朗读生效")
         selectorList.Choose(GetSpeechVoiceIndex(CONFIG.SpeechVoice))
         selectorList.OnEvent("Change", ChangeSpeechVoice)
     }
@@ -1476,6 +1476,7 @@ PromptForText(windowTitle, submitLabel, selectorType := "")
         SelectorList: selectorList,
         SpeedButton: speedButton,
         SpeedTooltip: speedTooltip,
+        SpeedMenu: 0,
         SubmitButton: submitButton,
         CancelButton: cancelButton,
         IconButtons: Map(),
@@ -1612,7 +1613,7 @@ HasInputIconFont(fontName := "")
             return false
         glyphs := Chr(0xE718) . Chr(0xE77A) . Chr(0xE768) . Chr(0xE769) . Chr(0xE71A) . Chr(0xE711)
             . Chr(0xE8C8) . Chr(0xE73E) . Chr(0xE767) . Chr(0xE77F)
-            . Chr(0xE74D) . Chr(0xF2B7) . Chr(0xE70E) . Chr(0xE70D) . Chr(0xE8AB)
+            . Chr(0xE74D) . Chr(0xE72C) . Chr(0xE70E) . Chr(0xE70D) . Chr(0xE8AB)
         indices := Buffer(StrLen(glyphs) * 2, 0)
         if DllCall("gdi32\GetGlyphIndicesW", "Ptr", dc, "Str", glyphs,
             "Int", StrLen(glyphs), "Ptr", indices.Ptr, "UInt", 1, "UInt") = 0xFFFFFFFF
@@ -1812,11 +1813,33 @@ GetSpeechSpeedLabel()
 }
 
 
-CycleSpeechSpeed(*)
+BuildSpeechSpeedMenu()
 {
     global CONFIG, SPEECH_SPEEDS
-    index := GetSpeechSpeedIndex(CONFIG.SpeechSpeed)
-    SetSpeechSpeed(SPEECH_SPEEDS[Mod(index, SPEECH_SPEEDS.Length) + 1].Value)
+    speedMenu := Menu()
+    for speed in SPEECH_SPEEDS
+    {
+        speedMenu.Add(speed.Label, SetSpeechSpeed.Bind(speed.Value))
+        if speed.Value = CONFIG.SpeechSpeed
+            speedMenu.Check(speed.Label)
+    }
+    return speedMenu
+}
+
+
+ShowSpeechSpeedMenu(*)
+{
+    global ActiveInputDialog
+    if !IsObject(ActiveInputDialog) || !IsObject(ActiveInputDialog.SpeedButton)
+        return
+
+    dialog := ActiveInputDialog
+    dialog.SpeedMenu := BuildSpeechSpeedMenu()
+    GetPhysicalWindowRect(dialog.SpeedButton.Hwnd, &x, &y, , &height)
+    previousMode := A_CoordModeMenu
+    CoordMode "Menu", "Screen"
+    try dialog.SpeedMenu.Show(x, y + height)
+    finally CoordMode "Menu", previousMode
 }
 
 
@@ -1836,10 +1859,20 @@ SetSpeechSpeed(speed, *)
 
 UpdateSpeechSpeedControls()
 {
-    global ActiveInputDialog
+    global ActiveInputDialog, SPEECH_SPEEDS, CONFIG
 
     if IsObject(ActiveInputDialog) && IsObject(ActiveInputDialog.SpeedButton)
+    {
         ActiveInputDialog.SpeedButton.Text := GetSpeechSpeedLabel()
+        if IsObject(ActiveInputDialog.SpeedMenu)
+        {
+            for speed in SPEECH_SPEEDS
+                if speed.Value = CONFIG.SpeechSpeed
+                    ActiveInputDialog.SpeedMenu.Check(speed.Label)
+                else
+                    ActiveInputDialog.SpeedMenu.Uncheck(speed.Label)
+        }
+    }
 }
 
 
@@ -3287,7 +3320,7 @@ CreateResultWindow()
         InitializeIconButton(ResultGui, ResultIconButtons, ResultView.SourceSpeakButton, 0xE767)
         InitializeIconButton(ResultGui, ResultIconButtons, ResultView.PasteButton, 0xE77F)
         InitializeIconButton(ResultGui, ResultIconButtons, ResultView.ClearButton, 0xE74D)
-        InitializeIconButton(ResultGui, ResultIconButtons, ResultView.TranslateButton, 0xF2B7)
+        InitializeIconButton(ResultGui, ResultIconButtons, ResultView.TranslateButton, 0xE72C)
         InitializeIconButton(ResultGui, ResultIconButtons, ResultPinButton, 0xE718)
         InitializeIconButton(ResultGui, ResultIconButtons, ResultStopButton, 0xE71A)
         InitializeIconButton(ResultGui, ResultIconButtons, ResultSpeakButton, 0xE767)
@@ -3703,7 +3736,7 @@ UpdateTranslationButton(busy)
     control := ResultView.TranslateButton
     control.Enabled := true
     control.Text := busy ? "取消翻译" : "翻译"
-    UpdateIconButton(control, busy ? 0xE71A : 0xF2B7)
+    UpdateIconButton(control, busy ? 0xE71A : 0xE72C)
 }
 
 
