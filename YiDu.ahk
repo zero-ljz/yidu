@@ -7,12 +7,12 @@
 ;@Ahk2Exe-SetCompanyName zero-ljz（空心）
 ;@Ahk2Exe-SetDescription 译读
 ;@Ahk2Exe-SetCopyright Copyright (c) 2026 zero-ljz
-;@Ahk2Exe-SetVersion 1.5.1.0
+;@Ahk2Exe-SetVersion 1.5.2.0
 
 SendMode "Input"
 CoordMode "Mouse", "Screen"
 
-global APP_VERSION := "1.5.1"
+global APP_VERSION := "1.5.2"
 global CONFIG := {
     Hotkey: "^F1",
     SpeakHotkey: "^F2",
@@ -1571,6 +1571,21 @@ CreateControlTooltip(guiObject, control, text)
 }
 
 
+UpdateControlTooltip(guiObject, control, tooltip, text)
+{
+    if !IsObject(tooltip)
+        return
+    tooltip.TextBuffer := Buffer(StrPut(text, "UTF-16") * 2)
+    StrPut(text, tooltip.TextBuffer, "UTF-16")
+    toolInfo := Buffer(A_PtrSize = 8 ? 72 : 48, 0)
+    NumPut("UInt", toolInfo.Size, "UInt", 0x11, toolInfo)
+    NumPut("Ptr", guiObject.Hwnd, "UPtr", control.Hwnd, toolInfo, 8)
+    NumPut("Ptr", tooltip.TextBuffer.Ptr, toolInfo, 8 + (3 * A_PtrSize) + 16)
+    DllCall("SendMessageW", "Ptr", tooltip.Hwnd, "UInt", 0x0439,
+        "Ptr", 0, "Ptr", toolInfo.Ptr)
+}
+
+
 GetInputIconFontName()
 {
     static selectedFont := 0
@@ -1666,7 +1681,7 @@ GetIconButton(hwnd)
 }
 
 
-UpdateIconButton(control, glyph, selected := false)
+UpdateIconButton(control, glyph, selected := false, tooltipText := "")
 {
     if !IsObject(control) || !control.HasProp("Hwnd")
         return
@@ -1675,18 +1690,8 @@ UpdateIconButton(control, glyph, selected := false)
         return
     button.Glyph := glyph
     button.Selected := selected
-    controlTooltip := button.Tooltip
-    if IsObject(controlTooltip)
-    {
-        controlTooltip.TextBuffer := Buffer(StrPut(control.Text, "UTF-16") * 2)
-        StrPut(control.Text, controlTooltip.TextBuffer, "UTF-16")
-        toolInfo := Buffer(A_PtrSize = 8 ? 72 : 48, 0)
-        NumPut("UInt", toolInfo.Size, "UInt", 0x11, toolInfo)
-        NumPut("Ptr", button.Gui.Hwnd, "UPtr", control.Hwnd, toolInfo, 8)
-        NumPut("Ptr", controlTooltip.TextBuffer.Ptr, toolInfo, 8 + (3 * A_PtrSize) + 16)
-        DllCall("SendMessageW", "Ptr", controlTooltip.Hwnd, "UInt", 0x0439,
-            "Ptr", 0, "Ptr", toolInfo.Ptr)
-    }
+    UpdateControlTooltip(button.Gui, control, button.Tooltip,
+        tooltipText != "" ? tooltipText : control.Text)
     DllCall("user32\InvalidateRect", "Ptr", control.Hwnd, "Ptr", 0, "Int", true)
 }
 
@@ -2013,10 +2018,10 @@ HandleInputKeyDown(wParam, lParam, message, hwnd)
 
     if IsObject(ResultView) && hwnd = ResultView.SourceEdit.Hwnd && wParam = 0x0D
     {
-        if GetKeyState("Shift")
-            SendMessage(0x00C2, true, StrPtr("`r`n"), , "ahk_id " . hwnd)
-        else
-            RetranslateFromWindow()
+        ; Let the native multiline edit and IME handle ordinary Enter.
+        if !GetKeyState("Ctrl") || IsInputComposing(hwnd)
+            return
+        RetranslateFromWindow()
         return 0
     }
 
@@ -2047,6 +2052,17 @@ HandleInputKeyDown(wParam, lParam, message, hwnd)
     }
 
     return 0
+}
+
+
+IsInputComposing(hwnd)
+{
+    context := DllCall("imm32\ImmGetContext", "Ptr", hwnd, "Ptr")
+    if !context
+        return false
+    try return DllCall("imm32\ImmGetCompositionStringW", "Ptr", context,
+        "UInt", 8, "Ptr", 0, "UInt", 0, "Int") > 0 ; GCS_COMPSTR
+    finally DllCall("imm32\ImmReleaseContext", "Ptr", hwnd, "Ptr", context)
 }
 
 
@@ -3244,8 +3260,9 @@ CreateResultWindow()
     global CONFIG, TRANSLATION_LANGUAGES, TRANSLATION_SERVICES
 
     palette := GetAppearancePalette()
+    layout := GetTranslationLayout()
     ResultGui := Gui(
-        "+Resize +MinSize440x192",
+        "+Resize +MinSize440x" . (layout.SourceOnlySpace + 64),
         "译读 · 翻译"
     )
     ResultGui.MarginX := 10
@@ -3285,9 +3302,9 @@ CreateResultWindow()
         ClearButton: ResultGui.AddButton("x310 y46 w44 h26", "清空"),
         PasteButton: ResultGui.AddButton("x362 y46 w44 h26", "粘贴"),
         TranslateButton: ResultGui.AddButton("x414 y46 w56 h26 Default", "翻译"),
-        SourceEdit: ResultGui.AddEdit("x10 y82 w460 h64 +Multi +WantReturn Background"
+        SourceEdit: ResultGui.AddEdit("x10 y" . layout.SourceY . " w460 h64 +Multi +WantReturn Background"
             . palette.FieldBackground . " c" . palette.Text),
-        ResultLabel: ResultGui.AddText("x10 y154 w32 h22 +0x200 Hidden", "译文")
+        ResultLabel: ResultGui.AddText("x10 y150 w32 h26 +0x200 Hidden", "译文")
     }
     ResultView.SourceList.Choose(1)
     ResultView.TargetList.Choose(1)
@@ -3296,15 +3313,15 @@ CreateResultWindow()
     ResultView.ServiceTooltip := CreateControlTooltip(ResultGui, ResultView.ServiceList, "翻译服务，点击切换")
     ResultView.ServiceList.Choose(GetTranslationServiceIndex(CONFIG.TranslationService))
     ResultEdit := ResultGui.AddEdit(
-        "x10 y180 w460 h64 +Multi +WantReturn +ReadOnly Hidden Background"
+        "x10 y178 w460 h64 +Multi +WantReturn +ReadOnly Hidden Background"
             . palette.FieldBackground . " c" . palette.Text
     )
     useIcons := HasInputIconFont()
     ResultIconButtons := Map()
-    ResultSpeakButton := ResultGui.AddButton("x44 y152 w" . (useIcons ? 28 : 80) . " h26 Hidden", "朗读译文")
-    ResultCopyButton := ResultGui.AddButton("x398 y152 w" . (useIcons ? 28 : 72) . " h26 Hidden", "复制结果")
+    ResultSpeakButton := ResultGui.AddButton("x44 y150 w" . (useIcons ? 28 : 80) . " h26 Hidden", "朗读译文")
+    ResultCopyButton := ResultGui.AddButton("x398 y150 w" . (useIcons ? 28 : 72) . " h26 Hidden", "复制结果")
     ResultPinButton := ResultGui.AddButton("x10 y254 w" . (useIcons ? 28 : 72) . " h26", "钉住")
-    ResultStopButton := ResultGui.AddButton("x78 y152 w" . (useIcons ? 28 : 48) . " h26 Hidden", "停止")
+    ResultStopButton := ResultGui.AddButton("x78 y150 w" . (useIcons ? 28 : 48) . " h26 Hidden", "停止")
     ResultCloseButton := ResultGui.AddButton("x418 y254 w" . (useIcons ? 28 : 52) . " h26", "关闭")
     ResultSpeakButton.Enabled := false
     ResultCopyButton.Enabled := false
@@ -3331,7 +3348,9 @@ CreateResultWindow()
     {
         ResultView.SwapButton.Text := "⇄"
         ResultView.SwapTooltip := CreateControlTooltip(ResultGui, ResultView.SwapButton, "交换语言")
+        ResultView.TranslateTooltip := CreateControlTooltip(ResultGui, ResultView.TranslateButton, "翻译（Ctrl+Enter）")
     }
+    UpdateTranslationButton(false)
     if ResultPinned
     {
         WinSetAlwaysOnTop(true, "ahk_id " . ResultGui.Hwnd)
@@ -3652,6 +3671,29 @@ GetTranslationPaneHeights(width)
 }
 
 
+GetTranslationLayout()
+{
+    toolbarY := 46
+    toolbarHeight := 26
+    toolbarGap := 2
+    paneGap := 12
+    footerSpace := 46
+    sourceY := toolbarY + toolbarHeight + toolbarGap
+    resultOffset := toolbarHeight + toolbarGap
+    collapsedToolbarY := toolbarY + toolbarHeight + paneGap
+    return {
+        SourceY: sourceY,
+        PaneGap: paneGap,
+        ResultOffset: resultOffset,
+        CollapsedToolbarY: collapsedToolbarY,
+        SourceOnlySpace: sourceY + footerSpace,
+        ExpandedResultSpace: sourceY + paneGap + resultOffset + footerSpace,
+        CollapsedResultSpace: collapsedToolbarY + resultOffset + footerSpace,
+        EmptyCollapsedHeight: toolbarY + toolbarHeight + footerSpace
+    }
+}
+
+
 FitTranslationWindow(*)
 {
     global ResultGui, ResultView, ResultEdit, ResultPinButton, ResultStopButton
@@ -3672,19 +3714,21 @@ FitTranslationWindow(*)
         }
         width := ResultView.LastWidth = 0 ? 480 : Max(440, width)
         paneHeights := GetTranslationPaneHeights(width)
+        layout := GetTranslationLayout()
         if hasResult
         {
-            minimum := 154 + ResultView.ResultMinHeight
-                + (ResultView.Expanded ? ResultView.SourceMinHeight + 8 : 0)
-            maximum := 154 + ResultView.ResultMaxHeight
-                + (ResultView.Expanded ? ResultView.SourceMaxHeight + 8 : 0)
-            desired := 154 + paneHeights.Result + (ResultView.Expanded ? paneHeights.Source + 8 : 0)
+            fixedSpace := ResultView.Expanded ? layout.ExpandedResultSpace : layout.CollapsedResultSpace
+            minimum := fixedSpace + ResultView.ResultMinHeight
+                + (ResultView.Expanded ? ResultView.SourceMinHeight : 0)
+            maximum := fixedSpace + ResultView.ResultMaxHeight
+                + (ResultView.Expanded ? ResultView.SourceMaxHeight : 0)
+            desired := fixedSpace + paneHeights.Result + (ResultView.Expanded ? paneHeights.Source : 0)
         }
         else
         {
-            minimum := ResultView.Expanded ? 128 + ResultView.SourceMinHeight : 118
-            maximum := ResultView.Expanded ? 128 + ResultView.SourceMaxHeight : 118
-            desired := ResultView.Expanded ? 128 + paneHeights.Source : 118
+            minimum := ResultView.Expanded ? layout.SourceOnlySpace + ResultView.SourceMinHeight : layout.EmptyCollapsedHeight
+            maximum := ResultView.Expanded ? layout.SourceOnlySpace + ResultView.SourceMaxHeight : layout.EmptyCollapsedHeight
+            desired := ResultView.Expanded ? layout.SourceOnlySpace + paneHeights.Source : layout.EmptyCollapsedHeight
         }
 
         ; Limit the entire window to the current monitor's usable height as well.
@@ -3728,7 +3772,7 @@ FitTranslationWindow(*)
 
 UpdateTranslationButton(busy)
 {
-    global ResultView
+    global ResultGui, ResultView
     if !IsObject(ResultView)
         return
     if !busy
@@ -3736,7 +3780,10 @@ UpdateTranslationButton(busy)
     control := ResultView.TranslateButton
     control.Enabled := true
     control.Text := busy ? "取消翻译" : "翻译"
-    UpdateIconButton(control, busy ? 0xE71A : 0xE72C)
+    tooltipText := busy ? "取消翻译" : "翻译（Ctrl+Enter）"
+    UpdateIconButton(control, busy ? 0xE71A : 0xE72C, false, tooltipText)
+    if ResultView.HasProp("TranslateTooltip")
+        UpdateControlTooltip(ResultGui, control, ResultView.TranslateTooltip, tooltipText)
 }
 
 
@@ -5441,24 +5488,26 @@ ResizeResultWindow(
     }
     maximized := minMax = 1
     hasResult := UpdateTranslationResultVisibility()
+    layout := GetTranslationLayout()
     if maximized
         sourceHeight := Max(ResultView.SourceMinHeight,
-            hasResult ? Floor((height - 162) / 2) : height - 128)
+            hasResult ? Floor((height - layout.ExpandedResultSpace) / 2) : height - layout.SourceOnlySpace)
     else
     {
         paneHeights := GetTranslationPaneHeights(width)
         sourceHeight := Min(paneHeights.Source,
-            Max(ResultView.SourceMinHeight, hasResult ? height - 162 - ResultView.ResultMinHeight : height - 128))
+            Max(ResultView.SourceMinHeight, hasResult ? height - layout.ExpandedResultSpace - ResultView.ResultMinHeight
+                : height - layout.SourceOnlySpace))
     }
-    ResultView.SourceEdit.Move(10, 82, width - 20, sourceHeight)
-    labelY := ResultView.Expanded ? 82 + sourceHeight + 8 : 82
+    ResultView.SourceEdit.Move(10, layout.SourceY, width - 20, sourceHeight)
+    labelY := ResultView.Expanded ? layout.SourceY + sourceHeight + layout.PaneGap : layout.CollapsedToolbarY
     if hasResult
     {
         ResultView.ResultLabel.Move(10, labelY)
-        speakButton.Move(44, labelY - 2)
+        speakButton.Move(44, labelY)
         copyButton.GetPos(, , &copyWidth)
-        copyButton.Move(width - 10 - copyWidth, labelY - 2)
-        resultY := labelY + 26
+        copyButton.Move(width - 10 - copyWidth, labelY)
+        resultY := labelY + layout.ResultOffset
         resultHeight := Max(ResultView.ResultMinHeight, height - 46 - resultY)
         if !maximized
             resultHeight := Min(ResultView.ResultMaxHeight, resultHeight)

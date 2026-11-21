@@ -750,12 +750,13 @@ AssertVoiceInputControls(dialog, paused := false, busy := true)
 }
 
 
-AssertInputIcon(dialog, control, glyph, label)
+AssertInputIcon(dialog, control, glyph, label, tooltipText := "")
 {
+    tooltipText := tooltipText != "" ? tooltipText : label
     button := dialog.IconButtons[control.Hwnd]
     Assert(button.Glyph = glyph, "Input icon follows action: " . label)
     Assert(control.Text = label, "Native accessible caption retained: " . label)
-    Assert(IsObject(button.Tooltip) && StrGet(button.Tooltip.TextBuffer, "UTF-16") = label,
+    Assert(IsObject(button.Tooltip) && StrGet(button.Tooltip.TextBuffer, "UTF-16") = tooltipText,
         "Input icon tooltip follows action: " . label)
     nativeText := Buffer(512, 0)
     toolInfo := Buffer(A_PtrSize = 8 ? 72 : 48, 0)
@@ -764,7 +765,7 @@ AssertInputIcon(dialog, control, glyph, label)
     NumPut("Ptr", nativeText.Ptr, toolInfo, 8 + (3 * A_PtrSize) + 16)
     DllCall("SendMessageW", "Ptr", button.Tooltip.Hwnd, "UInt", 0x0438,
         "Ptr", 0, "Ptr", toolInfo.Ptr)
-    Assert(StrGet(nativeText, "UTF-16") = label, "Native tooltip text updated: " . label)
+    Assert(StrGet(nativeText, "UTF-16") = tooltipText, "Native tooltip text updated: " . label)
     control.GetPos(, , &width, &height)
     Assert(width = 28 && height = 26, "Input icon dimensions stay compact and fixed")
     Assert((ControlGetStyle(control) & 0xF) = 0xB, "Native icon button uses owner drawing: " . ControlGetStyle(control))
@@ -1448,7 +1449,7 @@ TestResultSpeechControls()
             && !ResultSpeakButton.Visible && !ResultStopButton.Visible, "New window hides empty result and related actions")
         ResultGui.GetClientPos(, , &initialWidth, &emptyHeight)
         Assert(initialWidth = 480, "New translation window defaults to a compact width")
-        Assert(emptyHeight = 192, "New window has no unused result area")
+        Assert(emptyHeight = 184, "New window has no unused result area")
         Assert(ResultView.SourceSpeakButton.Enabled, "Source speech is available before translating")
         DispatchResultButton(ResultView.SourceSpeakButton)
         Assert(SpeechSession.Origin = "source" && SpeechSession.Chunks[1] = "initial original",
@@ -1482,7 +1483,7 @@ TestResultSpeechControls()
             AssertInputIcon(resultDialog, ResultView.SwapButton, 0xE8AB, "交换语言")
             AssertInputIcon(resultDialog, ResultView.PasteButton, 0xE77F, "粘贴")
             AssertInputIcon(resultDialog, ResultView.ClearButton, 0xE74D, "清空")
-            AssertInputIcon(resultDialog, ResultView.TranslateButton, 0xE72C, "翻译")
+            AssertInputIcon(resultDialog, ResultView.TranslateButton, 0xE72C, "翻译", "翻译（Ctrl+Enter）")
             AssertInputIcon(resultDialog, ResultView.SourceSpeakButton, 0xE767, "朗读原文")
             AssertInputIcon(resultDialog, ResultPinButton, 0xE718, "钉住")
             AssertInputIcon(resultDialog, ResultCopyButton, 0xE8C8, "复制结果")
@@ -1497,7 +1498,7 @@ TestResultSpeechControls()
         }
         ToggleResultPinned()
         Assert(!ResultPinned, "Result pin disabled")
-        for size in [{Width: 440, Height: 290}, {Width: 480, Height: 290}, {Width: 800, Height: 600}]
+        for size in [{Width: 440, Height: 288}, {Width: 480, Height: 288}, {Width: 800, Height: 600}]
         {
             ResizeResultWindow(ResultEdit, ResultPinButton, ResultSpeakButton,
                 ResultCopyButton, ResultCloseButton, ResultGui, 0, size.Width, size.Height)
@@ -1590,15 +1591,24 @@ AssertTranslationToolbarLayout(width, height)
 {
     global ResultView, ResultEdit, ResultSpeakButton, ResultCopyButton
     global ResultPinButton, ResultStopButton, ResultCloseButton
-    ResultEdit.GetPos(, &editY)
-    ResultView.ResultLabel.GetPos(&labelX, &labelY, &labelWidth)
+    ResultEdit.GetPos(&editX, &editY, &editWidth)
+    ResultView.ResultLabel.GetPos(&labelX, &labelY, &labelWidth, &labelHeight)
+    ResultView.SourceEdit.GetPos(&sourceX, &sourceY, &sourceWidth, &sourceHeight)
+    ResultView.SourceHeading.GetPos(, &sourceHeadingY, , &sourceHeadingHeight)
+    Assert(sourceHeadingHeight = 26 && labelHeight = sourceHeadingHeight,
+        "Source and translation toolbar headings share the same row height")
+    Assert(sourceY - sourceHeadingY - sourceHeadingHeight = 2 && editY - labelY - labelHeight = 2,
+        "Both toolbars keep the same compact two-pixel gap above their editors")
+    Assert(sourceX = editX && sourceWidth = editWidth, "Both editors align horizontally")
+    if ResultView.Expanded
+        Assert(labelY - sourceY - sourceHeight = 12, "Translation toolbar has twelve pixels of separation from source editor")
     previousRight := labelX + labelWidth
     for control in [ResultSpeakButton, ResultCopyButton]
     {
         control.GetPos(&x, &y, &w, &h)
         Assert(x >= previousRight + 2 && x + w <= width - 10,
             "Translation heading actions fit at compact widths")
-        Assert(y >= labelY - 2 && y + h <= editY,
+        Assert(y = labelY && h = labelHeight && editY - y - h = 2,
             "Speech and copy actions sit beside translation heading")
         previousRight := x + w
     }
@@ -1634,11 +1644,12 @@ TestUnifiedTranslationWindow()
     try
     {
         ShowResultAtMouse := true
+        TestTranslationInputKeys()
         TestTranslationAutoHeight()
         TestTranslationWidthOnlyResize()
         TestTranslationMaximizedLayout()
         TestTranslationActionAndSwap()
-        for size in [{Width: 440, Height: 290}, {Width: 480, Height: 290}, {Width: 800, Height: 600}]
+        for size in [{Width: 440, Height: 288}, {Width: 480, Height: 288}, {Width: 800, Height: 600}]
         {
             for expanded in [true, false]
             {
@@ -1656,7 +1667,7 @@ TestUnifiedTranslationWindow()
                 }
                 ResultView.SourceEdit.GetPos(, &sourceY, , &sourceHeight)
                 ResultEdit.GetPos(, &resultY, , &resultHeight)
-                Assert(resultY >= (expanded ? sourceY + sourceHeight + 30 : 100), "Original text above translation")
+                Assert(resultY = (expanded ? sourceY + sourceHeight + 40 : 112), "Original text above translation with consistent section spacing")
                 Assert(resultHeight >= 60 && resultY + resultHeight <= size.Height - 46, "Translation fits above footer")
                 previousRight := 0
                 for control in [ResultView.SourceSpeakButton, ResultView.ToggleButton,
@@ -1849,7 +1860,7 @@ TestTranslationEmptyLayout()
     FitTranslationWindow()
     ResultGui.GetClientPos(, , , &height)
     ResultView.SourceEdit.GetPos(, &sourceY, , &sourceHeight)
-    Assert(height = 348 && sourceHeight = ResultView.SourceMaxHeight,
+    Assert(height = 340 && sourceHeight = ResultView.SourceMaxHeight,
         "Source-only window grows to its content height limit")
     ResultPinButton.GetPos(, &footerY)
     Assert(footerY = sourceY + sourceHeight + 10 && !ResultEdit.Visible,
@@ -1860,7 +1871,7 @@ TestTranslationEmptyLayout()
         "Collapsing an empty result leaves a compact window with pin and close actions")
     ClearTranslationSource()
     ResultGui.GetClientPos(, , , &height)
-    Assert(height = 192 && ResultView.SourceEdit.Visible && !ResultEdit.Visible,
+    Assert(height = 184 && ResultView.SourceEdit.Visible && !ResultEdit.Visible,
         "Clearing restores the compact source editor")
     HideResultWindow()
     TranslateFromTray()
@@ -1883,7 +1894,7 @@ TestTranslationAutoHeight()
     ResultGui.GetClientPos(, , , &shortHeight)
     Assert(sourceHeight = ResultView.SourceMinHeight && resultHeight = ResultView.ResultMinHeight,
         "Short content uses minimum pane heights")
-    Assert(shortHeight = 290, "Short content shrinks window to expanded minimum")
+    Assert(shortHeight = 288, "Short content shrinks window to expanded minimum")
 
     ResultView.SourceEdit.Value := RepeatText("原文很长，需要换行显示。`n", 100)
     ResultEdit.Value := RepeatText("Translated content with explicit line breaks.`n", 100)
@@ -1897,11 +1908,11 @@ TestTranslationAutoHeight()
     Assert(sourceHeight >= ResultView.SourceMinHeight && sourceHeight <= ResultView.SourceMaxHeight
         && resultHeight >= ResultView.ResultMinHeight && resultHeight <= ResultView.ResultMaxHeight,
         "Rendered pane heights respect minimum and maximum")
-    Assert(longHeight > shortHeight && longHeight <= 742 && resultY + resultHeight <= longHeight - 46,
+    Assert(longHeight > shortHeight && longHeight <= 740 && resultY + resultHeight <= longHeight - 46,
         "Window grows for content within height limit")
     SetTranslationSourceExpanded(false)
     ResultGui.GetClientPos(, , , &collapsedHeight)
-    Assert(collapsedHeight < longHeight && collapsedHeight <= 514, "Collapsing source shrinks window")
+    Assert(collapsedHeight < longHeight && collapsedHeight <= 518, "Collapsing source shrinks window")
     SetTranslationSourceExpanded(true)
 
     ResultView.SourceEdit.Value := RepeatText("Words wrap naturally. ", 18)
@@ -2176,8 +2187,9 @@ TestTranslationMaximizedLayout()
         ResultView.SourceEdit.GetPos(, &sourceY, , &sourceHeight)
         ResultEdit.GetPos(, &resultY, , &resultHeight)
         Assert(Abs(sourceHeight - resultHeight) <= 1, "Maximized panes share available height equally")
-        Assert(sourceY + sourceHeight + 34 = resultY && resultY + resultHeight = height - 46,
+        Assert(sourceY + sourceHeight + 40 = resultY && resultY + resultHeight = height - 46,
             "Maximized panes fill content area down to footer")
+        AssertTranslationToolbarLayout(width, height)
         if height > 882
             Assert(sourceHeight > ResultView.SourceMaxHeight && resultHeight > ResultView.ResultMaxHeight,
                 "Maximized panes can exceed automatic content height caps")
@@ -2194,8 +2206,9 @@ TestTranslationMaximizedLayout()
         ResultEdit.GetPos(, &resultY, , &resultHeight)
         ResultGui.GetClientPos(, , , &height)
         Assert(DllCall("user32\IsZoomed", "Ptr", ResultGui.Hwnd)
-            && resultY = 108 && resultY + resultHeight = height - 46,
+            && resultY = 112 && resultY + resultHeight = height - 46,
             "Collapsed maximized result uses all available space")
+        AssertTranslationToolbarLayout(width, height)
         SetTranslationSourceExpanded(true)
         ResultView.SourceEdit.GetPos(, , , &sourceHeight)
         ResultEdit.GetPos(, , , &resultHeight)
@@ -2215,8 +2228,86 @@ TestTranslationMaximizedLayout()
         FitTranslationWindow()
     }
     ResultGui.GetClientPos(, , , &height)
-    Assert(height = 290, "Restoring window returns to automatic content height")
+    Assert(height = 288, "Restoring window returns to automatic content height")
 }
+
+TestTranslationInputKeys()
+{
+    global ResultGui, ResultView, ResultEdit, TranslationBusy, ActiveTranslationRequest
+    global TestTranslationTransport, ResultIconButtons
+    OnMessage(0x0100, HandleInputKeyDown)
+    try
+    {
+        ClearTranslationSource()
+        ResultGui.Show()
+        WinActivate("ahk_id " . ResultGui.Hwnd)
+        WinWaitActive("ahk_id " . ResultGui.Hwnd, , 2)
+        ResultView.SourceEdit.Focus()
+        ResultView.SourceEdit.Value := "first line"
+        sourceLength := DllCall("GetWindowTextLengthW", "Ptr", ResultView.SourceEdit.Hwnd, "Int")
+        SendMessage(0x00B1, sourceLength, sourceLength, , "ahk_id " . ResultView.SourceEdit.Hwnd)
+        SendTranslationInputKeys("{Enter}")
+        Assert(StrReplace(ResultView.SourceEdit.Value, "`r") = "first line`n" && !TranslationBusy,
+            "Enter inserts a native newline without submitting (text=" . StrReplace(ResultView.SourceEdit.Value, "`n", "<LF>")
+                . ", busy=" . TranslationBusy . ")")
+        SendTranslationInputKeys("+{Enter}")
+        Assert(StrReplace(ResultView.SourceEdit.Value, "`r") = "first line`n`n" && !TranslationBusy,
+            "Shift Enter continues to insert a newline")
+
+        ResultView.SourceEdit.Value := "first line`r`nsecond line"
+        original := ResultView.SourceEdit.Value
+        TestTranslationTransport := TestTranslationHttp()
+        SendTranslationInputKeys("^{Enter}")
+        Assert(TranslationBusy && StrReplace(ActiveTranslationRequest.Chunks[1], "`r") = StrReplace(original, "`r")
+            && ResultView.SourceEdit.Value = original, "Ctrl Enter submits multiline source without adding a newline")
+        request := ActiveTranslationRequest
+        transport := TestTranslationTransport
+        sourceLength := DllCall("GetWindowTextLengthW", "Ptr", ResultView.SourceEdit.Hwnd, "Int")
+        SendMessage(0x00B1, sourceLength, sourceLength, , "ahk_id " . ResultView.SourceEdit.Hwnd)
+        SendTranslationInputKeys("{Enter}")
+        Assert(ActiveTranslationRequest = request && transport.Aborts = 0
+            && StrReplace(ResultView.SourceEdit.Value, "`r") = "first line`nsecond line`n",
+            "Enter during translation only edits source and preserves the request (same=" . (ActiveTranslationRequest = request)
+                . ", aborts=" . transport.Aborts . ", text=" . StrReplace(ResultView.SourceEdit.Value, "`n", "<LF>")
+                . ", focus=" . DllCall("GetFocus", "Ptr") . ", edit=" . ResultView.SourceEdit.Hwnd . ")")
+
+        TestTranslationTransport := TestTranslationHttp()
+        SendTranslationInputKeys("^{Enter}")
+        Assert(transport.Aborts = 1 && ActiveTranslationRequest != request,
+            "Ctrl Enter replaces a pending request instead of cancelling the action")
+        ClearTranslationSource()
+        SendTranslationInputKeys("^{Enter}")
+        Assert(!TranslationBusy && !IsObject(ActiveTranslationRequest), "Ctrl Enter ignores empty source")
+        if !ResultIconButtons.Count
+        {
+            Assert(StrGet(ResultView.TranslateTooltip.TextBuffer, "UTF-16") = "翻译（Ctrl+Enter）",
+                "Text button fallback exposes the translation shortcut")
+        }
+        FileAppend("PASS: native Enter and Shift Enter newlines, Ctrl Enter translation and pending request replacement`n", "*")
+    }
+    finally
+    {
+        OnMessage(0x0100, HandleInputKeyDown, 0)
+        ClearTranslationSource()
+    }
+}
+
+
+SendTranslationInputKeys(keys)
+{
+    Critical "Off"
+    try
+    {
+        SendEvent(keys)
+        Sleep(30)
+    }
+    finally
+    {
+        SendEvent("{LCtrl up}{RCtrl up}{LShift up}{RShift up}")
+        Critical
+    }
+}
+
 
 TestTranslationActionAndSwap()
 {
@@ -2253,7 +2344,7 @@ TestTranslationActionAndSwap()
             "Completion restores translation action")
         if ResultIconButtons.Count
             AssertInputIcon({Gui: ResultGui, IconButtons: ResultIconButtons}, ResultView.TranslateButton,
-                0xE72C, "翻译")
+                0xE72C, "翻译", "翻译（Ctrl+Enter）")
         Assert(!(ControlGetStyle(ResultEdit) & 0x800), "Completed translation allows editing")
         result := ResultEdit.Value
         SendMessage(0x0102, Ord("x"), 1, , "ahk_id " . ResultEdit.Hwnd)
@@ -2408,7 +2499,7 @@ TestTranslationPlaybackLayout()
         for expanded in [true, false]
         {
             SetTranslationSourceExpanded(expanded)
-            for size in [{Width: 440, Height: 290}, {Width: 480, Height: 290}, {Width: 800, Height: 600}]
+            for size in [{Width: 440, Height: 288}, {Width: 480, Height: 288}, {Width: 800, Height: 600}]
             {
                 ResizeResultWindow(ResultEdit, ResultPinButton, ResultSpeakButton,
                     ResultCopyButton, ResultCloseButton, ResultGui, 0, size.Width, size.Height)

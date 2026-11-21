@@ -4,6 +4,8 @@
 
 运行 `build-msix.ps1 -Mode Store` 时，构建脚本会自动使用 Partner Center 为译读分配的正式身份。不要将开发身份 `YiDu.Desktop` 用于商店提交。
 
+商店包默认文件名为 `YiDu-四段版本号-x64-store.msix`，例如 `release\YiDu-1.5.2.0-x64-store.msix`。
+
 | 项目 | 值 |
 | --- | --- |
 | Package Identity Name | `zero-ljz.65035B1959F4` |

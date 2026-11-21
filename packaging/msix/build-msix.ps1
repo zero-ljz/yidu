@@ -80,10 +80,14 @@ if ($Mode -eq 'Store') {
     }
 }
 
-$displayVersion = (($Version -split '\.')[0..2] -join '.')
 if (-not $OutputPath) {
-    $packageFlavor = if ($Mode -eq 'Store') { 'Store-MSIX' } else { 'MSIX' }
-    $OutputPath = Join-Path $root "release\YiDu-$displayVersion-$packageFlavor-x64.msix"
+    if ($Mode -eq 'Store') {
+        $OutputPath = Join-Path $root "release\YiDu-$Version-x64-store.msix"
+    }
+    else {
+        $displayVersion = (($Version -split '\.')[0..2] -join '.')
+        $OutputPath = Join-Path $root "release\YiDu-$displayVersion-MSIX-x64.msix"
+    }
 }
 elseif (-not [IO.Path]::IsPathRooted($OutputPath)) {
     $OutputPath = Join-Path $root $OutputPath
